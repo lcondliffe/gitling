@@ -1,0 +1,319 @@
+// Package render draws the dashboard to an io.Writer.
+//
+// Color is 256-color ANSI only (no terminal-capability probing), so output is
+// safe over SSH and in plain terminals. Greens are chosen to read on both light
+// and dark backgrounds; when color is off, heatmap intensity is carried by glyph
+// density instead of hue so no information is lost.
+package render
+
+import (
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/gitdata"
+)
+
+// Model is everything the dashboard needs to draw; the cmd layer assembles it.
+type Model struct {
+	Vitals       gitdata.Vitals
+	RangeLabel   string // e.g. "last 14 weeks"
+	Days         []aggregate.DayCount
+	TotalCommits int
+	Streak       int
+	Contributors []aggregate.Contributor
+	Growth       aggregate.Growth
+	HotFiles     []aggregate.FileChurn
+	Now          time.Time
+}
+
+// SGR color codes. cText ("") means the terminal's default foreground, which is
+// the background-agnostic choice for body text.
+const (
+	cLabel  = "38;5;245" // section labels / muted text
+	cFaint  = "38;5;240" // empty bar remainder
+	cAccent = "38;5;40"  // primary green
+	cBright = "38;5;47"  // emphasis green
+	cAmber  = "38;5;214" // dirty-tree warning
+	cRed    = "38;5;203" // negative growth
+)
+
+// Per-level heatmap colors (0 = empty) and the no-color density ramp.
+var (
+	heatColors  = [5]string{"38;5;239", "38;5;22", "38;5;28", "38;5;34", "38;5;40"}
+	heatGlyphs  = [5]string{"·", "░", "▒", "▓", "█"}
+	sparkRamp   = []rune("▁▂▃▄▅▆▇█")
+	cellFilled  = "■"
+	cellToday   = "□" // hollow square marks today (the "distinct border")
+	barFill     = "█"
+	barRemain   = "░"
+	contribBarW = 22
+)
+
+type palette struct{ on bool }
+
+func (p palette) c(code, s string) string {
+	if !p.on || code == "" {
+		return s
+	}
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+// Dashboard prints all four panels in order.
+func Dashboard(w io.Writer, m Model, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "Repo", "")
+	fmt.Fprintln(w)
+	p.vitals(w, m.Vitals)
+
+	fmt.Fprintln(w)
+	p.header(w, "Activity", m.RangeLabel)
+	fmt.Fprintln(w)
+	p.heatmap(w, m)
+
+	fmt.Fprintln(w)
+	p.header(w, "Top contributors", "")
+	fmt.Fprintln(w)
+	p.contributors(w, m.Contributors)
+
+	fmt.Fprintln(w)
+	p.header(w, "Codebase growth", "6mo")
+	fmt.Fprintln(w)
+	p.growth(w, m.Growth, m.HotFiles)
+	fmt.Fprintln(w)
+}
+
+func (p palette) header(w io.Writer, label, suffix string) {
+	s := strings.ToUpper(label)
+	if suffix != "" {
+		s += "  ·  " + suffix
+	}
+	fmt.Fprintln(w, p.c(cLabel, s))
+}
+
+func (p palette) vitals(w io.Writer, v gitdata.Vitals) {
+	dotColor := cAccent
+	if v.DirtyFiles > 0 {
+		dotColor = cAmber
+	}
+	parts := []string{p.c(dotColor, "●") + " " + p.c(cBright, v.Branch)}
+	if v.HasUpstream {
+		parts = append(parts, fmt.Sprintf("%s%d %s%d",
+			p.c(cAccent, "↑"), v.Ahead, p.c(cLabel, "↓"), v.Behind))
+	}
+	parts = append(parts,
+		p.c(cLabel, fmt.Sprintf("%d dirty", v.DirtyFiles)),
+		p.c(cLabel, fmt.Sprintf("%d stash", v.StashCount)),
+		p.c(cLabel, fmt.Sprintf("%d branches", v.BranchCount)),
+	)
+	fmt.Fprintln(w, "  "+strings.Join(parts, "   "))
+}
+
+type cell struct {
+	present bool
+	count   int
+	today   bool
+}
+
+// buildGrid lays days out as 7 rows (Sun..Sat) by N week-columns, oldest left.
+// It returns the grid, its column count, and the max daily count for scaling.
+func buildGrid(days []aggregate.DayCount, now time.Time) (grid [7][]cell, cols, max int) {
+	if len(days) == 0 {
+		return grid, 0, 0
+	}
+	since, until := days[0].Date, days[len(days)-1].Date
+	gridStart := since.AddDate(0, 0, -int(since.Weekday())) // back to Sunday
+	cols = aggregate.DaysBetween(gridStart, until)/7 + 1
+	for r := range grid {
+		grid[r] = make([]cell, cols)
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	for _, dc := range days {
+		col := aggregate.DaysBetween(gridStart, dc.Date) / 7
+		row := int(dc.Date.Weekday())
+		if col < 0 || col >= cols {
+			continue
+		}
+		grid[row][col] = cell{present: true, count: dc.Count, today: dc.Date.Equal(today)}
+		if dc.Count > max {
+			max = dc.Count
+		}
+	}
+	return grid, cols, max
+}
+
+func (p palette) heatmap(w io.Writer, m Model) {
+	grid, cols, max := buildGrid(m.Days, m.Now)
+	for r := 0; r < 7; r++ {
+		var b strings.Builder
+		b.WriteString("  ")
+		for col := 0; col < cols; col++ {
+			b.WriteString(p.cellGlyph(grid[r][col], max))
+			b.WriteByte(' ')
+		}
+		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
+	}
+	fmt.Fprintln(w)
+	summary := fmt.Sprintf("%d commits in range · streak: %d days", m.TotalCommits, m.Streak)
+	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
+}
+
+func (p palette) cellGlyph(c cell, max int) string {
+	if !c.present {
+		return " "
+	}
+	lvl := level(c.count, max)
+	if c.today {
+		code := heatColors[lvl]
+		if lvl == 0 {
+			code = cAccent // keep today visible even with no commits
+		}
+		return p.c(code, cellToday)
+	}
+	if p.on {
+		return p.c(heatColors[lvl], cellFilled)
+	}
+	return heatGlyphs[lvl]
+}
+
+func level(count, max int) int {
+	if count <= 0 {
+		return 0
+	}
+	if max <= 0 {
+		return 1
+	}
+	switch q := float64(count) / float64(max); {
+	case q > 0.75:
+		return 4
+	case q > 0.5:
+		return 3
+	case q > 0.25:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
+	if len(cs) == 0 {
+		fmt.Fprintln(w, "  "+p.c(cLabel, "no commits in range"))
+		return
+	}
+	nameW := 0
+	for _, c := range cs {
+		if n := runeLen(c.Name); n > nameW {
+			nameW = n
+		}
+	}
+	if nameW > 16 {
+		nameW = 16
+	}
+	maxC := cs[0].Commits
+	for _, c := range cs {
+		name := truncate(c.Name, nameW)
+		filled := 0
+		if maxC > 0 {
+			filled = int(float64(c.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+		}
+		if filled > contribBarW {
+			filled = contribBarW
+		}
+		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
+			p.c(cFaint, strings.Repeat(barRemain, contribBarW-filled))
+		pad := strings.Repeat(" ", nameW-runeLen(name))
+		fmt.Fprintf(w, "  %s%s  %s  %s\n", name, pad, bar, p.c(cLabel, strconv.Itoa(c.Commits)))
+	}
+}
+
+func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChurn) {
+	var pct string
+	switch {
+	case !g.HasPct:
+		pct = p.c(cLabel, "·")
+	case g.Pct >= 0:
+		pct = p.c(cAccent, fmt.Sprintf("▲ %.0f%%", g.Pct))
+	default:
+		pct = p.c(cRed, fmt.Sprintf("▼ %.0f%%", -g.Pct))
+	}
+	fmt.Fprintf(w, "  %s LOC  %s\n", p.c(cBright, humanInt(g.TotalLOC)), pct)
+
+	if s := p.sparkline(g.Spark); s != "" {
+		fmt.Fprintln(w, "  "+s)
+	}
+
+	if len(hot) > 0 {
+		parts := make([]string, 0, len(hot))
+		for _, f := range hot {
+			parts = append(parts, fmt.Sprintf("%s (%d)", f.Path, f.Commits))
+		}
+		line := fmt.Sprintf("%d hot files · %s", len(hot), strings.Join(parts, " · "))
+		fmt.Fprintln(w, "  "+p.c(cLabel, line))
+	}
+}
+
+func (p palette) sparkline(vals []int) string {
+	if len(vals) == 0 {
+		return ""
+	}
+	min, max := vals[0], vals[0]
+	for _, v := range vals {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	var b strings.Builder
+	for _, v := range vals {
+		idx := 0
+		if max > min {
+			idx = int(float64(v-min)/float64(max-min)*float64(len(sparkRamp)-1) + 0.5)
+		}
+		if idx < 0 {
+			idx = 0
+		} else if idx >= len(sparkRamp) {
+			idx = len(sparkRamp) - 1
+		}
+		b.WriteRune(sparkRamp[idx])
+	}
+	return p.c(cAccent, b.String())
+}
+
+func humanInt(n int) string {
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	s := strconv.Itoa(n)
+	var out []byte
+	for i := 0; i < len(s); i++ {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, s[i])
+	}
+	if neg {
+		return "-" + string(out)
+	}
+	return string(out)
+}
+
+func runeLen(s string) int { return len([]rune(s)) }
+
+func truncate(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "…"
+}

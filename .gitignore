@@ -1,0 +1,4 @@
+# Compiled binary
+/gitling
+
+# gitling's own cache lives under .git/, so it is already ignored.
