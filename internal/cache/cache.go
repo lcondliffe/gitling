@@ -19,7 +19,7 @@ import (
 const (
 	dirName  = "gitling-cache"
 	fileName = "aggregates.gob"
-	version  = 1 // bump to invalidate on incompatible schema changes
+	version  = 2 // bump to invalidate on incompatible schema changes
 )
 
 // Store reads and writes the aggregate cache for one repository.

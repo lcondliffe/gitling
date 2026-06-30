@@ -151,7 +151,8 @@ func (r *Repo) Vitals() (Vitals, error) {
 // entire history when revRange is empty. Results carry numstat-derived file
 // lists and insertion/deletion totals.
 func (r *Repo) Commits(revRange string) ([]Commit, error) {
-	format := "%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%ct"
+	// %aN/%aE are mailmap-resolved, so a .mailmap collapses split identities.
+	format := "%x1e%H%x1f%aN%x1f%aE%x1f%at%x1f%ct"
 	args := []string{"log", "--no-merges", "--numstat", "--pretty=format:" + format}
 	if revRange != "" {
 		args = append(args, revRange)

@@ -10,6 +10,7 @@ package aggregate
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/gitdata"
@@ -148,24 +149,39 @@ func Streak(days []DayCount) int {
 
 // TopContributors ranks authors by commit count within [since, until], limited
 // to n (n<=0 means all).
+//
+// Identities are stored by email but coalesced by case-insensitive display name
+// for presentation: the common real-world case is one person committing under
+// several emails, and for an at-a-glance view merging them is friendlier than
+// showing the same name twice. (.mailmap, applied upstream via %aN/%aE, is the
+// precise mechanism; this is the pragmatic fallback when none exists.)
 func (a *Aggregates) TopContributors(since, until time.Time, n int) []Contributor {
 	sk, uk := truncateDay(since).Format(dayFmt), truncateDay(until).Format(dayFmt)
-	totals := map[string]int{}
+	perEmail := map[string]int{}
 	for day, b := range a.Days {
 		if day < sk || day > uk {
 			continue
 		}
 		for email, c := range b.Authors {
-			totals[email] += c
+			perEmail[email] += c
 		}
 	}
-	out := make([]Contributor, 0, len(totals))
-	for email, c := range totals {
+	byName := map[string]*Contributor{}
+	for email, c := range perEmail {
 		name := a.AuthorNames[email]
 		if name == "" {
 			name = email
 		}
-		out = append(out, Contributor{Email: email, Name: name, Commits: c})
+		key := strings.ToLower(strings.TrimSpace(name))
+		if existing, ok := byName[key]; ok {
+			existing.Commits += c
+		} else {
+			byName[key] = &Contributor{Email: email, Name: name, Commits: c}
+		}
+	}
+	out := make([]Contributor, 0, len(byName))
+	for _, c := range byName {
+		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Commits != out[j].Commits {

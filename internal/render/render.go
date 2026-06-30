@@ -108,8 +108,8 @@ func (p palette) vitals(w io.Writer, v gitdata.Vitals) {
 	}
 	parts = append(parts,
 		p.c(cLabel, fmt.Sprintf("%d dirty", v.DirtyFiles)),
-		p.c(cLabel, fmt.Sprintf("%d stash", v.StashCount)),
-		p.c(cLabel, fmt.Sprintf("%d branches", v.BranchCount)),
+		p.c(cLabel, fmt.Sprintf("%d %s", v.StashCount, plural(v.StashCount, "stash", "stashes"))),
+		p.c(cLabel, fmt.Sprintf("%d %s", v.BranchCount, plural(v.BranchCount, "branch", "branches"))),
 	)
 	fmt.Fprintln(w, "  "+strings.Join(parts, "   "))
 }
@@ -236,10 +236,12 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	switch {
 	case !g.HasPct:
 		pct = p.c(cLabel, "·")
-	case g.Pct >= 0:
+	case g.Pct >= 0.5:
 		pct = p.c(cAccent, fmt.Sprintf("▲ %.0f%%", g.Pct))
-	default:
+	case g.Pct <= -0.5:
 		pct = p.c(cRed, fmt.Sprintf("▼ %.0f%%", -g.Pct))
+	default:
+		pct = p.c(cLabel, "≈ 0%") // 6mo baseline exists but essentially flat
 	}
 	fmt.Fprintf(w, "  %s LOC  %s\n", p.c(cBright, humanInt(g.TotalLOC)), pct)
 
@@ -303,6 +305,13 @@ func humanInt(n int) string {
 		return "-" + string(out)
 	}
 	return string(out)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
