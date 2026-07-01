@@ -39,12 +39,9 @@ func buildVersion() string {
 func main() {
 	view := "dashboard"
 	args := os.Args[1:]
-	for i, arg := range args {
-		if arg == "graph" {
-			view = "graph"
-			args = append(args[:i], args[i+1:]...)
-			break
-		}
+	if len(args) > 0 && args[0] == "graph" {
+		view = "graph"
+		args = args[1:]
 	}
 
 	noColor := flag.Bool("no-color", false, "disable ANSI color output")

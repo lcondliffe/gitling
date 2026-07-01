@@ -62,6 +62,17 @@ func TestBucketCounts(t *testing.T) {
 	if len(monthly) != 1 || monthly[0].Start.Format(dayFmt) != "2024-06-01" || monthly[0].Count != 7 {
 		t.Errorf("monthly buckets = %+v, want one June bucket count 7", monthly)
 	}
+
+	daily := BucketCounts(days, "day")
+	if len(daily) != len(days) {
+		t.Fatalf("daily buckets = %d, want %d (one per input day): %+v", len(daily), len(days), daily)
+	}
+	for i, b := range daily {
+		wantDay := days[i].Date.Format(dayFmt)
+		if b.Start.Format(dayFmt) != wantDay || b.End.Format(dayFmt) != wantDay || b.Count != days[i].Count {
+			t.Errorf("daily bucket %d = %+v, want start/end %s count %d", i, b, wantDay, days[i].Count)
+		}
+	}
 }
 
 func TestStreak(t *testing.T) {
