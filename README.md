@@ -1,5 +1,7 @@
 # gitling
 
+[![CI](https://github.com/lcondliffe/gitling/actions/workflows/ci.yml/badge.svg)](https://github.com/lcondliffe/gitling/actions/workflows/ci.yml)
+
 A terminal-native, at-a-glance summary of a git repository: recent activity,
 top contributors, and codebase growth. Run it once at the start of a session to
 orient yourself — it's not a replacement for `git log` or a full TUI.
@@ -7,6 +9,16 @@ orient yourself — it's not a replacement for `git log` or a full TUI.
 ```
 gitling
 ```
+
+## Install
+
+```
+go install github.com/lcondliffe/gitling/cmd/gitling@latest
+```
+
+Or grab a prebuilt binary for your platform from the
+[latest release](https://github.com/lcondliffe/gitling/releases/latest) and put
+it on your `PATH`.
 
 ## Output
 
@@ -54,6 +66,17 @@ go build ./cmd/gitling
 ```
 
 Pure Go standard library — no external dependencies.
+
+## Releases
+
+Tagging a commit `vX.Y.Z` triggers the release workflow, which cross-compiles
+binaries (linux/darwin/windows, amd64/arm64), attaches them with a
+`checksums.txt`, and publishes a GitHub Release with auto-generated notes:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Status
 

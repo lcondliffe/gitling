@@ -20,11 +20,20 @@ import (
 
 const defaultDays = 14 * 7 // default range: last 14 weeks
 
+// version is overwritten at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	noColor := flag.Bool("no-color", false, "disable ANSI color output")
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("gitling", version)
+		return
+	}
 
 	// Positional args are reserved for future drill-down subcommands
 	// (--graph, --churn, --contributors, --branches); reject them for now.
@@ -48,6 +57,7 @@ Usage:
 Flags:
   --since <dur>   time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
   --no-color      plain output with no ANSI escape codes
+  --version       print version and exit
 
 Run inside a git repository.
 `)
