@@ -241,13 +241,25 @@ func (a *Aggregates) BuildGrowth(since, until time.Time) Growth {
 		}
 	}
 
+	// Sparkline: cumulative LOC sampled at evenly spaced points across the
+	// range, capped so it stays a readable width on any range length.
+	const maxSparkPoints = 36
 	start := truncateDay(since)
-	for week := start; !week.After(now); week = week.AddDate(0, 0, 7) {
-		end := week.AddDate(0, 0, 6)
-		if end.After(now) {
-			end = now
+	totalDays := DaysBetween(start, now)
+	if totalDays < 1 {
+		totalDays = 1
+	}
+	points := totalDays
+	if points > maxSparkPoints {
+		points = maxSparkPoints
+	}
+	for i := 1; i <= points; i++ {
+		off := int(math.Round(float64(i) * float64(totalDays) / float64(points)))
+		d := start.AddDate(0, 0, off)
+		if d.After(now) {
+			d = now
 		}
-		g.Spark = append(g.Spark, clampZero(a.netUpTo(end)))
+		g.Spark = append(g.Spark, clampZero(a.netUpTo(d)))
 	}
 	return g
 }

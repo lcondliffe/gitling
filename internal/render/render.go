@@ -205,21 +205,27 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
 		fmt.Fprintln(w, "  "+p.c(cLabel, "no commits in range"))
 		return
 	}
-	nameW := 0
+	nameW, countW := 0, 0
 	for _, c := range cs {
 		if n := runeLen(c.Name); n > nameW {
 			nameW = n
+		}
+		if n := len(strconv.Itoa(c.Commits)); n > countW {
+			countW = n
 		}
 	}
 	if nameW > 16 {
 		nameW = 16
 	}
 	maxC := cs[0].Commits
-	for _, c := range cs {
+	for i, c := range cs {
 		name := truncate(c.Name, nameW)
 		filled := 0
 		if maxC > 0 {
 			filled = int(float64(c.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+		}
+		if filled < 1 {
+			filled = 1 // always show a sliver so every contributor reads as present
 		}
 		if filled > contribBarW {
 			filled = contribBarW
@@ -227,7 +233,11 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
 		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
 			p.c(cFaint, strings.Repeat(barRemain, contribBarW-filled))
 		pad := strings.Repeat(" ", nameW-runeLen(name))
-		fmt.Fprintf(w, "  %s%s  %s  %s\n", name, pad, bar, p.c(cLabel, strconv.Itoa(c.Commits)))
+		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
+		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, bar, count)
+		if i < len(cs)-1 {
+			fmt.Fprintln(w) // breathing room so stacked bars don't merge into a block
+		}
 	}
 }
 
@@ -250,12 +260,20 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	}
 
 	if len(hot) > 0 {
-		parts := make([]string, 0, len(hot))
+		countW := 0
 		for _, f := range hot {
-			parts = append(parts, fmt.Sprintf("%s (%d)", f.Path, f.Commits))
+			if n := len(strconv.Itoa(f.Commits)); n > countW {
+				countW = n
+			}
 		}
-		line := fmt.Sprintf("%d hot files · %s", len(hot), strings.Join(parts, " · "))
-		fmt.Fprintln(w, "  "+p.c(cLabel, line))
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  "+p.c(cLabel, "hot files"))
+		for _, f := range hot {
+			// Count-first keeps the numbers aligned and the (long) paths from
+			// wrapping mid-string the way an inline list does.
+			count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
+			fmt.Fprintf(w, "    %s   %s\n", count, f.Path)
+		}
 	}
 }
 
