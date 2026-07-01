@@ -34,7 +34,6 @@ type Model struct {
 // the background-agnostic choice for body text.
 const (
 	cLabel  = "38;5;245" // section labels / muted text
-	cFaint  = "38;5;240" // empty bar remainder
 	cAccent = "38;5;40"  // primary green
 	cBright = "38;5;47"  // emphasis green
 	cAmber  = "38;5;214" // dirty-tree warning
@@ -49,7 +48,6 @@ var (
 	cellFilled  = "■"
 	cellToday   = "□" // hollow square marks today (the "distinct border")
 	barFill     = "█"
-	barRemain   = "░"
 	contribBarW = 22
 )
 
@@ -218,7 +216,7 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
 		nameW = 16
 	}
 	maxC := cs[0].Commits
-	for i, c := range cs {
+	for _, c := range cs {
 		name := truncate(c.Name, nameW)
 		filled := 0
 		if maxC > 0 {
@@ -230,14 +228,14 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
 		if filled > contribBarW {
 			filled = contribBarW
 		}
+		// Fill-only bar: a green run padded with spaces (no track). Compact
+		// enough to keep rows tight, but with no dim block to stack up; the
+		// space padding still lines the counts up.
 		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
-			p.c(cFaint, strings.Repeat(barRemain, contribBarW-filled))
+			strings.Repeat(" ", contribBarW-filled)
 		pad := strings.Repeat(" ", nameW-runeLen(name))
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
 		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, bar, count)
-		if i < len(cs)-1 {
-			fmt.Fprintln(w) // breathing room so stacked bars don't merge into a block
-		}
 	}
 }
 
