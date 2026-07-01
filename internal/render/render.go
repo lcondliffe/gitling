@@ -116,7 +116,7 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  "+p.c(cLabel, "counts"))
-	if len(m.Buckets) == 0 {
+	if len(m.Buckets) == 0 || m.TotalCommits == 0 {
 		fmt.Fprintln(w, "    "+p.c(cLabel, "no commits in range"))
 		fmt.Fprintln(w)
 		return

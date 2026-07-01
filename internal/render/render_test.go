@@ -1,6 +1,8 @@
 package render
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +34,30 @@ func TestBarChartRendersScaledRows(t *testing.T) {
 	runes := []rune(got[1])
 	if runes[len(runes)-1] != '█' {
 		t.Fatalf("bottom row should include a full-height max column, got %q", got[1])
+	}
+}
+
+func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
+	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	buckets := []aggregate.PeriodCount{
+		{Start: start, End: start, Count: 0},
+		{Start: start.AddDate(0, 0, 1), End: start.AddDate(0, 0, 1), Count: 0},
+	}
+	var buf bytes.Buffer
+	Graph(&buf, GraphModel{
+		RangeLabel:   "last 2d",
+		Bucket:       "day",
+		Buckets:      buckets,
+		TotalCommits: 0,
+		Now:          start.AddDate(0, 0, 1),
+	}, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "no commits in range") {
+		t.Fatalf("Graph empty range output missing compact message:\n%s", out)
+	}
+	if strings.Contains(out, "2024-06-01") || strings.Contains(out, "2024-06-02") {
+		t.Fatalf("Graph empty range should not print zero-count bucket rows:\n%s", out)
 	}
 }
 
