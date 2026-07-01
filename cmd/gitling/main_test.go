@@ -39,3 +39,14 @@ func TestRangeLabel(t *testing.T) {
 		t.Errorf("rangeLabel(30d) = %q", got)
 	}
 }
+
+func TestValidateBucket(t *testing.T) {
+	for _, in := range []string{"day", "week", "month"} {
+		if err := validateBucket(in); err != nil {
+			t.Errorf("validateBucket(%q) error: %v", in, err)
+		}
+	}
+	if err := validateBucket("quarter"); err == nil {
+		t.Fatal("validateBucket(quarter) = nil error, want error")
+	}
+}

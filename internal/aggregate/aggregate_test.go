@@ -39,6 +39,31 @@ func TestDailyCountsAndTotal(t *testing.T) {
 	}
 }
 
+func TestBucketCounts(t *testing.T) {
+	days := []DayCount{
+		{Date: day(2024, 6, 3), Count: 2}, // Monday
+		{Date: day(2024, 6, 4), Count: 0},
+		{Date: day(2024, 6, 5), Count: 1},
+		{Date: day(2024, 6, 10), Count: 4}, // next Monday
+	}
+
+	weekly := BucketCounts(days, "week")
+	if len(weekly) != 2 {
+		t.Fatalf("weekly buckets = %d, want 2: %+v", len(weekly), weekly)
+	}
+	if weekly[0].Start.Format(dayFmt) != "2024-06-03" || weekly[0].End.Format(dayFmt) != "2024-06-09" || weekly[0].Count != 3 {
+		t.Errorf("first weekly bucket = %+v, want 2024-06-03..2024-06-09 count 3", weekly[0])
+	}
+	if weekly[1].Start.Format(dayFmt) != "2024-06-10" || weekly[1].Count != 4 {
+		t.Errorf("second weekly bucket = %+v, want 2024-06-10 count 4", weekly[1])
+	}
+
+	monthly := BucketCounts(days, "month")
+	if len(monthly) != 1 || monthly[0].Start.Format(dayFmt) != "2024-06-01" || monthly[0].Count != 7 {
+		t.Errorf("monthly buckets = %+v, want one June bucket count 7", monthly)
+	}
+}
+
 func TestStreak(t *testing.T) {
 	mk := func(counts ...int) []DayCount {
 		out := make([]DayCount, len(counts))

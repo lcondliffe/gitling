@@ -37,25 +37,48 @@ func buildVersion() string {
 }
 
 func main() {
+	view := "dashboard"
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "graph" {
+			view = "graph"
+			args = append(args[:i], args[i+1:]...)
+			break
+		}
+	}
+
 	noColor := flag.Bool("no-color", false, "disable ANSI color output")
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
+	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
+	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
-	flag.Parse()
+	if err := flag.CommandLine.Parse(args); err != nil {
+		os.Exit(2)
+	}
 
 	if *showVersion {
 		fmt.Println("gitling", buildVersion())
 		return
 	}
 
-	// Positional args are reserved for future drill-down subcommands
-	// (--graph, --churn, --contributors, --branches); reject them for now.
+	if *graph {
+		view = "graph"
+	}
 	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "gitling: unexpected argument %q (subcommands are not implemented in v0.1)\n", flag.Arg(0))
+		if flag.NArg() == 1 && flag.Arg(0) == "graph" {
+			view = "graph"
+		} else {
+			fmt.Fprintf(os.Stderr, "gitling: unexpected argument %q\n", flag.Arg(0))
+			os.Exit(2)
+		}
+	}
+	if err := validateBucket(*bucket); err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*noColor)); err != nil {
+	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -66,9 +89,12 @@ func usage() {
 
 Usage:
   gitling [flags]
+  gitling graph [flags]
 
 Flags:
   --since <dur>   time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
+  --graph         show the full activity graph drill-down
+  --bucket <b>    activity graph bucket: day, week, month (default day)
   --no-color      plain output with no ANSI escape codes
   --version       print version and exit
 
@@ -76,7 +102,7 @@ Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -136,12 +162,33 @@ func run(stdout io.Writer, since string, color bool) error {
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
 	m.Streak = aggregate.Streak(m.Days)
+	if view == "graph" {
+		render.Graph(stdout, render.GraphModel{
+			RangeLabel:   m.RangeLabel,
+			Bucket:       bucket,
+			Days:         m.Days,
+			Buckets:      aggregate.BucketCounts(m.Days, bucket),
+			TotalCommits: m.TotalCommits,
+			Streak:       m.Streak,
+			Now:          now,
+		}, color)
+		return nil
+	}
 	m.Contributors = agg.TopContributors(sinceTime, now, 5)
 	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
 	m.Growth = agg.BuildGrowth(now)
 
 	render.Dashboard(stdout, m, color)
 	return nil
+}
+
+func validateBucket(bucket string) error {
+	switch bucket {
+	case "day", "week", "month":
+		return nil
+	default:
+		return fmt.Errorf("invalid --bucket %q (use day, week, or month)", bucket)
+	}
 }
 
 // colorEnabled honors --no-color and the NO_COLOR convention, and auto-disables

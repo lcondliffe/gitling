@@ -30,6 +30,17 @@ type Model struct {
 	Now          time.Time
 }
 
+// GraphModel is the focused activity drill-down view.
+type GraphModel struct {
+	RangeLabel   string
+	Bucket       string
+	Days         []aggregate.DayCount
+	Buckets      []aggregate.PeriodCount
+	TotalCommits int
+	Streak       int
+	Now          time.Time
+}
+
 // SGR color codes. cText ("") means the terminal's default foreground, which is
 // the background-agnostic choice for body text.
 const (
@@ -83,6 +94,43 @@ func Dashboard(w io.Writer, m Model, color bool) {
 	p.header(w, "Codebase growth", "6mo")
 	fmt.Fprintln(w)
 	p.growth(w, m.Growth, m.HotFiles)
+	fmt.Fprintln(w)
+}
+
+// Graph prints a focused activity drill-down: the familiar heatmap, a taller
+// bucketed activity chart, and exact bucket totals for scripting-by-eyeball.
+func Graph(w io.Writer, m GraphModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "Activity graph", m.RangeLabel+" · "+m.Bucket)
+	fmt.Fprintln(w)
+	p.heatmap(w, Model{Days: m.Days, TotalCommits: m.TotalCommits, Streak: m.Streak, Now: m.Now})
+
+	if chart := p.activityChart(m.Buckets, activityChartHeight); len(chart) > 0 {
+		fmt.Fprintln(w)
+		for _, line := range chart {
+			fmt.Fprintln(w, "  "+line)
+		}
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+p.c(cLabel, "counts"))
+	if len(m.Buckets) == 0 {
+		fmt.Fprintln(w, "    "+p.c(cLabel, "no commits in range"))
+		fmt.Fprintln(w)
+		return
+	}
+	countW := 0
+	for _, b := range m.Buckets {
+		if n := len(strconv.Itoa(b.Count)); n > countW {
+			countW = n
+		}
+	}
+	for _, b := range m.Buckets {
+		count := p.c(cLabel, fmt.Sprintf("%*d", countW, b.Count))
+		fmt.Fprintf(w, "    %s   %s\n", count, periodLabel(b, m.Bucket))
+	}
 	fmt.Fprintln(w)
 }
 
@@ -278,7 +326,8 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	}
 }
 
-const growthChartHeight = 5 // rows tall; height*8 gives the vertical resolution
+const growthChartHeight = 5   // rows tall; height*8 gives the vertical resolution
+const activityChartHeight = 8 // taller drill-down chart for the graph view
 
 // growthChart renders vals as a vertical bar chart growthChartHeight rows tall,
 // min-max normalized so the peak reaches the top and the flat start sits near
@@ -324,6 +373,57 @@ func (p palette) growthChart(vals []int, height int) []string {
 		lines[r] = p.c(cAccent, strings.TrimRight(b.String(), " "))
 	}
 	return lines
+}
+
+func (p palette) activityChart(buckets []aggregate.PeriodCount, height int) []string {
+	vals := make([]int, len(buckets))
+	for i, b := range buckets {
+		vals[i] = b.Count
+	}
+	return p.barChart(vals, height)
+}
+
+func (p palette) barChart(vals []int, height int) []string {
+	if len(vals) == 0 || height < 1 {
+		return nil
+	}
+	max := vals[0]
+	for _, v := range vals {
+		if v > max {
+			max = v
+		}
+	}
+	if max <= 0 {
+		return nil
+	}
+	lines := make([]string, height)
+	for r := 0; r < height; r++ {
+		cellBottom := (height - 1 - r) * 8
+		var b strings.Builder
+		for _, v := range vals {
+			eighths := int(float64(v)/float64(max)*float64(height*8) + 0.5)
+			fill := eighths - cellBottom
+			if fill < 0 {
+				fill = 0
+			} else if fill > 8 {
+				fill = 8
+			}
+			b.WriteRune(chartBlocks[fill])
+		}
+		lines[r] = p.c(cAccent, strings.TrimRight(b.String(), " "))
+	}
+	return lines
+}
+
+func periodLabel(b aggregate.PeriodCount, bucket string) string {
+	switch bucket {
+	case "week":
+		return fmt.Sprintf("%s..%s", b.Start.Format("2006-01-02"), b.End.Format("2006-01-02"))
+	case "month":
+		return b.Start.Format("2006-01")
+	default:
+		return b.Start.Format("2006-01-02")
+	}
 }
 
 func humanInt(n int) string {
