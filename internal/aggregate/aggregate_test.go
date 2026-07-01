@@ -127,7 +127,7 @@ func TestBuildGrowth(t *testing.T) {
 		commit("A", "a@x", day(2024, 6, 1), 60, 10),  // within last 6mo: net +50
 	})
 	until := day(2024, 7, 1) // baseline = 2024-01-01
-	g := a.BuildGrowth(day(2024, 6, 1), until)
+	g := a.BuildGrowth(until)
 
 	if g.TotalLOC != 150 {
 		t.Errorf("TotalLOC = %d, want 150", g.TotalLOC)
@@ -151,7 +151,7 @@ func TestBuildGrowthNoBaseline(t *testing.T) {
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 6, 1), 100, 0), // only recent data
 	})
-	g := a.BuildGrowth(day(2024, 6, 1), day(2024, 7, 1))
+	g := a.BuildGrowth(day(2024, 7, 1))
 	if g.HasPct {
 		t.Errorf("HasPct = true, want false (no pre-6mo baseline)")
 	}

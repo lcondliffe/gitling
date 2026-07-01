@@ -224,10 +224,11 @@ func (a *Aggregates) HotFiles(since, until time.Time, n int) []FileChurn {
 	return out
 }
 
-// BuildGrowth computes the codebase-growth panel. TotalLOC and the 6-month
-// percentage use full history; the sparkline tracks cumulative LOC at each
-// week-end across [since, until].
-func (a *Aggregates) BuildGrowth(since, until time.Time) Growth {
+// BuildGrowth computes the codebase-growth panel. All of it describes the same
+// 6-month window: TotalLOC (cumulative net lines to now), the percent change vs
+// 6 months ago, and Spark — cumulative LOC sampled across those 6 months, which
+// render draws as a multi-row min-max bar chart (see render.growthChart).
+func (a *Aggregates) BuildGrowth(until time.Time) Growth {
 	now := truncateDay(until)
 	g := Growth{TotalLOC: clampZero(a.netUpTo(now))}
 
@@ -241,11 +242,8 @@ func (a *Aggregates) BuildGrowth(since, until time.Time) Growth {
 		}
 	}
 
-	// Sparkline: cumulative LOC sampled at evenly spaced points across the
-	// range, capped so it stays a readable width on any range length.
 	const maxSparkPoints = 36
-	start := truncateDay(since)
-	totalDays := DaysBetween(start, now)
+	totalDays := DaysBetween(baseDay, now)
 	if totalDays < 1 {
 		totalDays = 1
 	}
@@ -255,7 +253,7 @@ func (a *Aggregates) BuildGrowth(since, until time.Time) Growth {
 	}
 	for i := 1; i <= points; i++ {
 		off := int(math.Round(float64(i) * float64(totalDays) / float64(points)))
-		d := start.AddDate(0, 0, off)
+		d := baseDay.AddDate(0, 0, off)
 		if d.After(now) {
 			d = now
 		}

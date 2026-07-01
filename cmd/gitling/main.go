@@ -138,7 +138,7 @@ func run(stdout io.Writer, since string, color bool) error {
 	m.Streak = aggregate.Streak(m.Days)
 	m.Contributors = agg.TopContributors(sinceTime, now, 5)
 	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
-	m.Growth = agg.BuildGrowth(sinceTime, now)
+	m.Growth = agg.BuildGrowth(now)
 
 	render.Dashboard(stdout, m, color)
 	return nil

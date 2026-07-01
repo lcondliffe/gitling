@@ -44,7 +44,7 @@ const (
 var (
 	heatColors  = [5]string{"38;5;239", "38;5;22", "38;5;28", "38;5;34", "38;5;40"}
 	heatGlyphs  = [5]string{"·", "░", "▒", "▓", "█"}
-	sparkRamp   = []rune("▁▂▃▄▅▆▇█")
+	chartBlocks = []rune(" ▁▂▃▄▅▆▇█") // 0..8 eighths of a cell
 	cellFilled  = "■"
 	cellToday   = "□" // hollow square marks today (the "distinct border")
 	barFill     = "█"
@@ -253,8 +253,11 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	}
 	fmt.Fprintf(w, "  %s LOC  %s\n", p.c(cBright, humanInt(g.TotalLOC)), pct)
 
-	if s := p.sparkline(g.Spark); s != "" {
-		fmt.Fprintln(w, "  "+s)
+	if chart := p.growthChart(g.Spark, growthChartHeight); len(chart) > 0 {
+		fmt.Fprintln(w)
+		for _, line := range chart {
+			fmt.Fprintln(w, "  "+line)
+		}
 	}
 
 	if len(hot) > 0 {
@@ -275,9 +278,16 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	}
 }
 
-func (p palette) sparkline(vals []int) string {
-	if len(vals) == 0 {
-		return ""
+const growthChartHeight = 5 // rows tall; height*8 gives the vertical resolution
+
+// growthChart renders vals as a vertical bar chart growthChartHeight rows tall,
+// min-max normalized so the peak reaches the top and the flat start sits near
+// the floor. Using multiple rows (rather than a single-line sparkline) gives the
+// trend real vertical resolution — the climb is actually visible. Returns one
+// string per row, top first.
+func (p palette) growthChart(vals []int, height int) []string {
+	if len(vals) == 0 || height < 1 {
+		return nil
 	}
 	min, max := vals[0], vals[0]
 	for _, v := range vals {
@@ -288,20 +298,32 @@ func (p palette) sparkline(vals []int) string {
 			max = v
 		}
 	}
-	var b strings.Builder
-	for _, v := range vals {
-		idx := 0
-		if max > min {
-			idx = int(float64(v-min)/float64(max-min)*float64(len(sparkRamp)-1) + 0.5)
+	span := max - min
+	// Height of each column measured in eighths of a cell (0..height*8).
+	eighths := make([]int, len(vals))
+	for i, v := range vals {
+		if span > 0 {
+			eighths[i] = int(float64(v-min)/float64(span)*float64(height*8) + 0.5)
+		} else {
+			eighths[i] = 4 // flat history: a thin baseline rather than a full block
 		}
-		if idx < 0 {
-			idx = 0
-		} else if idx >= len(sparkRamp) {
-			idx = len(sparkRamp) - 1
-		}
-		b.WriteRune(sparkRamp[idx])
 	}
-	return p.c(cAccent, b.String())
+	lines := make([]string, height)
+	for r := 0; r < height; r++ { // r == 0 is the top row
+		cellBottom := (height - 1 - r) * 8
+		var b strings.Builder
+		for _, e := range eighths {
+			fill := e - cellBottom
+			if fill < 0 {
+				fill = 0
+			} else if fill > 8 {
+				fill = 8
+			}
+			b.WriteRune(chartBlocks[fill])
+		}
+		lines[r] = p.c(cAccent, strings.TrimRight(b.String(), " "))
+	}
+	return lines
 }
 
 func humanInt(n int) string {
