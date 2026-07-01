@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +21,20 @@ import (
 
 const defaultDays = 14 * 7 // default range: last 14 weeks
 
-// version is overwritten at build time via -ldflags "-X main.version=...".
+// version is overwritten at build time via -ldflags "-X main.version=..." in
+// the release workflow. For `go install module@vX.Y.Z` builds (no ldflags), it
+// falls back to the version Go stamps into the build info.
 var version = "dev"
+
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
+}
 
 func main() {
 	noColor := flag.Bool("no-color", false, "disable ANSI color output")
@@ -31,7 +44,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("gitling", version)
+		fmt.Println("gitling", buildVersion())
 		return
 	}
 
