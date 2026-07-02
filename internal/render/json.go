@@ -37,14 +37,14 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 			Bucket:       bucket,
 			Buckets:      jsonBuckets(buckets),
 		},
-		Contributors: m.Contributors,
+		Contributors: jsonContributors(m.Contributors),
 		Growth: jsonGrowth{
 			TotalLOC: m.Growth.TotalLOC,
 			Pct:      pct,
 			HasPct:   m.Growth.HasPct,
 			Series:   m.Growth.Spark,
 		},
-		HotFiles: m.HotFiles,
+		HotFiles: jsonHotFiles(m.HotFiles),
 	}
 
 	enc := json.NewEncoder(w)
@@ -53,13 +53,13 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 }
 
 type jsonModel struct {
-	Range        string                  `json:"range"`
-	GeneratedAt  string                  `json:"generated_at"`
-	Vitals       jsonVitals              `json:"vitals"`
-	Activity     jsonActivity            `json:"activity"`
-	Contributors []aggregate.Contributor `json:"contributors"`
-	Growth       jsonGrowth              `json:"growth"`
-	HotFiles     []aggregate.FileChurn   `json:"hot_files"`
+	Range        string            `json:"range"`
+	GeneratedAt  string            `json:"generated_at"`
+	Vitals       jsonVitals        `json:"vitals"`
+	Activity     jsonActivity      `json:"activity"`
+	Contributors []jsonContributor `json:"contributors"`
+	Growth       jsonGrowth        `json:"growth"`
+	HotFiles     []jsonHotFile     `json:"hot_files"`
 }
 
 type jsonVitals struct {
@@ -99,6 +99,17 @@ type jsonGrowth struct {
 	Series   []int    `json:"series"`
 }
 
+type jsonContributor struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Commits int    `json:"commits"`
+}
+
+type jsonHotFile struct {
+	Path    string `json:"path"`
+	Commits int    `json:"commits"`
+}
+
 func jsonDays(days []aggregate.DayCount) []jsonDay {
 	out := make([]jsonDay, 0, len(days))
 	for _, d := range days {
@@ -117,6 +128,29 @@ func jsonBuckets(buckets []aggregate.PeriodCount) []jsonBucket {
 			Start:   b.Start.Format("2006-01-02"),
 			End:     b.End.Format("2006-01-02"),
 			Commits: b.Count,
+		})
+	}
+	return out
+}
+
+func jsonContributors(contributors []aggregate.Contributor) []jsonContributor {
+	out := make([]jsonContributor, 0, len(contributors))
+	for _, c := range contributors {
+		out = append(out, jsonContributor{
+			Email:   c.Email,
+			Name:    c.Name,
+			Commits: c.Commits,
+		})
+	}
+	return out
+}
+
+func jsonHotFiles(files []aggregate.FileChurn) []jsonHotFile {
+	out := make([]jsonHotFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, jsonHotFile{
+			Path:    f.Path,
+			Commits: f.Commits,
 		})
 	}
 	return out

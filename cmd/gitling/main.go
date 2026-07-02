@@ -162,13 +162,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
 	m.Streak = aggregate.Streak(m.Days)
 	buckets := aggregate.BucketCounts(m.Days, bucket)
-	m.Contributors = agg.TopContributors(sinceTime, now, 5)
-	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
-	m.Growth = agg.BuildGrowth(now)
-	if jsonOutput {
-		return render.JSON(stdout, m, bucket, buckets)
-	}
-	if view == "graph" {
+	if !jsonOutput && view == "graph" {
 		render.Graph(stdout, render.GraphModel{
 			RangeLabel:   m.RangeLabel,
 			Bucket:       bucket,
@@ -179,6 +173,13 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			Now:          now,
 		}, color)
 		return nil
+	}
+
+	m.Contributors = agg.TopContributors(sinceTime, now, 5)
+	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
+	m.Growth = agg.BuildGrowth(now)
+	if jsonOutput {
+		return render.JSON(stdout, m, bucket, buckets)
 	}
 
 	render.Dashboard(stdout, m, color)
