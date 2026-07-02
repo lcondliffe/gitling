@@ -114,6 +114,8 @@ jobs:
             exit 0
           fi
 
+          gh auth setup-git
+
           version="${TAG#v}"
           checksums="${GITHUB_WORKSPACE}/dist/checksums.txt"
           tap_dir="$(mktemp -d)"
@@ -188,7 +190,8 @@ jobs:
           EOF
           sed -i 's/^          //' "$formula"
 
-          if git diff --quiet; then
+          git add "$formula"
+          if git diff --cached --quiet; then
             if [ -n "$existing_pr" ]; then
               echo "Homebrew formula PR already exists for ${TAG}: ${existing_pr}"
             else
@@ -197,7 +200,6 @@ jobs:
             exit 0
           fi
 
-          git add "$formula"
           git commit -m "gitling ${TAG}"
           git push origin "$branch"
 
