@@ -89,6 +89,13 @@ type DayCount struct {
 	Count int
 }
 
+// PeriodCount is a day/week/month activity bucket for drill-down views.
+type PeriodCount struct {
+	Start time.Time
+	End   time.Time
+	Count int
+}
+
 // Contributor is one author's commit total within a range.
 type Contributor struct {
 	Email   string
@@ -128,6 +135,29 @@ func TotalCommits(days []DayCount) int {
 		n += d.Count
 	}
 	return n
+}
+
+// BucketCounts folds a contiguous daily series into day, week, or month buckets.
+// Weeks start on Monday, which reads more naturally in long-range terminal
+// summaries than the Sunday-first heatmap layout.
+func BucketCounts(days []DayCount, bucket string) []PeriodCount {
+	if len(days) == 0 {
+		return nil
+	}
+	var out []PeriodCount
+	var cur PeriodCount
+	for i, d := range days {
+		start := bucketStart(d.Date, bucket)
+		if i == 0 || !start.Equal(cur.Start) {
+			if i > 0 {
+				out = append(out, cur)
+			}
+			cur = PeriodCount{Start: start, End: bucketEnd(start, bucket)}
+		}
+		cur.Count += d.Count
+	}
+	out = append(out, cur)
+	return out
 }
 
 // Streak counts consecutive active days ending at the most recent day. A blank
@@ -287,6 +317,31 @@ func (a *Aggregates) hasDataBefore(t time.Time) bool {
 func truncateDay(t time.Time) time.Time {
 	t = t.Local()
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+func bucketStart(t time.Time, bucket string) time.Time {
+	t = truncateDay(t)
+	switch bucket {
+	case "week":
+		// time.Weekday is Sunday=0; convert so Monday is the start.
+		daysSinceMonday := (int(t.Weekday()) + 6) % 7
+		return t.AddDate(0, 0, -daysSinceMonday)
+	case "month":
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+	default:
+		return t
+	}
+}
+
+func bucketEnd(start time.Time, bucket string) time.Time {
+	switch bucket {
+	case "week":
+		return start.AddDate(0, 0, 6)
+	case "month":
+		return start.AddDate(0, 1, -1)
+	default:
+		return start
+	}
 }
 
 func clampZero(n int) int {

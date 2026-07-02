@@ -33,9 +33,11 @@ Four panels, single screen:
 ## Usage
 
 ```
-gitling              # default dashboard (last 14 weeks)
-gitling --since 30d  # override the range for all sections (d, w, mo, y)
-gitling --no-color   # plain output, no ANSI escape codes
+gitling                  # default dashboard (last 14 weeks)
+gitling --since 30d      # override the range for all sections (d, w, mo, y)
+gitling graph --since 1y # focused activity drill-down
+gitling --graph --bucket week --since 1y
+gitling --no-color       # plain output, no ANSI escape codes
 ```
 
 Color is also auto-disabled when stdout isn't a terminal or `NO_COLOR` is set.
@@ -78,5 +80,7 @@ git push origin v0.1.0
 
 ## Status
 
-v0.1. Drill-down subcommands (`--graph`, `--churn`, `--contributors`,
-`--branches`) are reserved but not yet implemented.
+v0.1. Drill-down views are starting to land: `gitling graph` / `--graph`
+shows a focused activity view with day/week/month buckets. Other drill-downs
+(`--churn`, `--contributors`, `--branches`) are reserved but not yet
+implemented.
