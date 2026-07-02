@@ -14,6 +14,16 @@ orient yourself — it's not a replacement for `git log` or a full TUI.
 go install github.com/lcondliffe/gitling/cmd/gitling@latest
 ```
 
+`go install` writes the binary to `$GOBIN`, or to `$(go env GOPATH)/bin` when
+`GOBIN` is unset. Make sure that directory is on your `PATH`:
+
+```
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+For zsh, add that line to `~/.zshrc` so `gitling` is available in new
+terminals too.
+
 Or grab a prebuilt binary for your platform from the
 [latest release](https://github.com/lcondliffe/gitling/releases/latest) and put
 it on your `PATH`.
