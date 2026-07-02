@@ -12,7 +12,7 @@ orient yourself — it's not a replacement for `git log` or a full TUI.
 
 With Homebrew:
 
-```
+```sh
 brew install lcondliffe/tap/gitling
 ```
 

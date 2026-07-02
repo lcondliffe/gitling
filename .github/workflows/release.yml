@@ -140,7 +140,15 @@ jobs:
           cd "$tap_dir"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "gitling-${TAG}"
+
+          branch="gitling-${TAG}"
+          existing_pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""')"
+          if git fetch origin "$branch"; then
+            git checkout -B "$branch" "origin/$branch"
+          else
+            git checkout -b "$branch"
+          fi
+
           mkdir -p Formula
           cat > "$formula" <<EOF
           class Gitling < Formula
@@ -181,15 +189,26 @@ jobs:
           sed -i 's/^          //' "$formula"
 
           if git diff --quiet; then
-            echo "Homebrew formula already up to date for ${TAG}"
+            if [ -n "$existing_pr" ]; then
+              echo "Homebrew formula PR already exists for ${TAG}: ${existing_pr}"
+            else
+              echo "Homebrew formula already up to date for ${TAG}"
+            fi
             exit 0
           fi
 
           git add "$formula"
           git commit -m "gitling ${TAG}"
-          git push origin "gitling-${TAG}"
-          gh pr create \
-            --title "gitling ${TAG}" \
-            --body "Update gitling formula for ${TAG}.\n\nSource release: https://github.com/${SOURCE_REPO}/releases/tag/${TAG}" \
-            --head "gitling-${TAG}" \
-            --base main
+          git push origin "$branch"
+
+          if [ -n "$existing_pr" ]; then
+            echo "Updated existing Homebrew formula PR: ${existing_pr}"
+          else
+            printf 'Update gitling formula for %s.\n\nSource release: https://github.com/%s/releases/tag/%s\n' \
+              "$TAG" "$SOURCE_REPO" "$TAG" > pr-body.md
+            gh pr create \
+              --title "gitling ${TAG}" \
+              --body-file pr-body.md \
+              --head "$branch" \
+              --base main
+          fi
