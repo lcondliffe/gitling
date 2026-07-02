@@ -10,6 +10,14 @@ orient yourself — it's not a replacement for `git log` or a full TUI.
 
 ## Install
 
+With Homebrew:
+
+```
+brew install lcondliffe/tap/gitling
+```
+
+Or with Go:
+
 ```
 go install github.com/lcondliffe/gitling/cmd/gitling@latest
 ```
