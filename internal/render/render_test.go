@@ -2,11 +2,13 @@ package render
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
 func TestBarChartEdges(t *testing.T) {
@@ -58,6 +60,60 @@ func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
 	}
 	if strings.Contains(out, "2024-06-01") || strings.Contains(out, "2024-06-02") {
 		t.Fatalf("Graph empty range should not print zero-count bucket rows:\n%s", out)
+	}
+}
+
+func TestJSONIncludesDashboardData(t *testing.T) {
+	start := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	model := Model{
+		Vitals: gitdata.Vitals{
+			Branch:      "main",
+			HasUpstream: true,
+			Ahead:       1,
+			Behind:      2,
+			DirtyFiles:  3,
+			StashCount:  4,
+			BranchCount: 5,
+		},
+		RangeLabel:   "last 2d",
+		Days:         []aggregate.DayCount{{Date: start, Count: 2}},
+		TotalCommits: 2,
+		Streak:       1,
+		Contributors: []aggregate.Contributor{{Name: "Ada", Email: "ada@example.com", Commits: 2}},
+		Growth: aggregate.Growth{
+			TotalLOC: 42,
+			Pct:      12.5,
+			HasPct:   true,
+			Spark:    []int{40, 42},
+		},
+		HotFiles: []aggregate.FileChurn{{Path: "main.go", Commits: 2}},
+		Now:      start,
+	}
+	buckets := []aggregate.PeriodCount{{Start: start, End: start, Count: 2}}
+
+	var buf bytes.Buffer
+	if err := JSON(&buf, model, "day", buckets); err != nil {
+		t.Fatalf("JSON returned error: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, buf.String())
+	}
+	if got["range"] != "last 2d" {
+		t.Fatalf("range = %v, want last 2d", got["range"])
+	}
+	activity := got["activity"].(map[string]any)
+	if activity["total_commits"] != float64(2) || activity["streak_days"] != float64(1) {
+		t.Fatalf("activity totals = %#v", activity)
+	}
+	days := activity["days"].([]any)
+	if days[0].(map[string]any)["date"] != "2024-06-01" {
+		t.Fatalf("day date = %#v", days[0])
+	}
+	growth := got["growth"].(map[string]any)
+	if growth["total_loc"] != float64(42) || growth["pct"] != 12.5 {
+		t.Fatalf("growth = %#v", growth)
 	}
 }
 
