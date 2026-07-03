@@ -7,6 +7,9 @@ on:
 permissions:
   contents: write
 
+env:
+  HOMEBREW_TAP_REPO: lcondliffe/homebrew-tap
+
 jobs:
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -98,3 +101,116 @@ jobs:
             --title "gitling ${GITHUB_REF_NAME}" \
             --notes-file notes.md \
             dist/gitling_* dist/checksums.txt
+
+      - name: update Homebrew tap formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          SOURCE_REPO: ${{ github.repository }}
+          TAP_REPO: ${{ env.HOMEBREW_TAP_REPO }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_TOKEN is not set; skipping Homebrew tap update" >&2
+            exit 0
+          fi
+
+          gh auth setup-git
+
+          version="${TAG#v}"
+          checksums="${GITHUB_WORKSPACE}/dist/checksums.txt"
+          tap_dir="$(mktemp -d)"
+          formula="Formula/gitling.rb"
+
+          checksum_for() {
+            asset="$1"
+            awk -v asset="$asset" '$2 == asset { print $1 }' "$checksums"
+          }
+
+          darwin_amd64="$(checksum_for "gitling_${TAG}_darwin_amd64.tar.gz")"
+          darwin_arm64="$(checksum_for "gitling_${TAG}_darwin_arm64.tar.gz")"
+          linux_amd64="$(checksum_for "gitling_${TAG}_linux_amd64.tar.gz")"
+          linux_arm64="$(checksum_for "gitling_${TAG}_linux_arm64.tar.gz")"
+
+          for value in "$darwin_amd64" "$darwin_arm64" "$linux_amd64" "$linux_arm64"; do
+            if [ -z "$value" ]; then
+              echo "Missing expected checksum in ${checksums}" >&2
+              exit 1
+            fi
+          done
+
+          gh repo clone "$TAP_REPO" "$tap_dir"
+          cd "$tap_dir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          branch="gitling-${TAG}"
+          existing_pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""')"
+          if git fetch origin "$branch"; then
+            git checkout -B "$branch" "origin/$branch"
+          else
+            git checkout -b "$branch"
+          fi
+
+          mkdir -p Formula
+          cat > "$formula" <<EOF
+          class Gitling < Formula
+            desc "At-a-glance git repository dashboard for the terminal"
+            homepage "https://github.com/${SOURCE_REPO}"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${SOURCE_REPO}/releases/download/${TAG}/gitling_${TAG}_darwin_arm64.tar.gz"
+                sha256 "${darwin_arm64}"
+              else
+                url "https://github.com/${SOURCE_REPO}/releases/download/${TAG}/gitling_${TAG}_darwin_amd64.tar.gz"
+                sha256 "${darwin_amd64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/${SOURCE_REPO}/releases/download/${TAG}/gitling_${TAG}_linux_arm64.tar.gz"
+                sha256 "${linux_arm64}"
+              else
+                url "https://github.com/${SOURCE_REPO}/releases/download/${TAG}/gitling_${TAG}_linux_amd64.tar.gz"
+                sha256 "${linux_amd64}"
+              end
+            end
+
+            def install
+              bin.install "gitling"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/gitling --version")
+            end
+          end
+          EOF
+          sed -i 's/^          //' "$formula"
+
+          git add "$formula"
+          if git diff --cached --quiet; then
+            if [ -n "$existing_pr" ]; then
+              echo "Homebrew formula PR already exists for ${TAG}: ${existing_pr}"
+            else
+              echo "Homebrew formula already up to date for ${TAG}"
+            fi
+            exit 0
+          fi
+
+          git commit -m "gitling ${TAG}"
+          git push origin "$branch"
+
+          if [ -n "$existing_pr" ]; then
+            echo "Updated existing Homebrew formula PR: ${existing_pr}"
+          else
+            printf 'Update gitling formula for %s.\n\nSource release: https://github.com/%s/releases/tag/%s\n' \
+              "$TAG" "$SOURCE_REPO" "$TAG" > pr-body.md
+            gh pr create \
+              --title "gitling ${TAG}" \
+              --body-file pr-body.md \
+              --head "$branch" \
+              --base main
+          fi
