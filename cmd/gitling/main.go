@@ -48,6 +48,7 @@ func main() {
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
+	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
 	if err := flag.CommandLine.Parse(args); err != nil {
@@ -75,7 +76,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket); err != nil {
+	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, *jsonOutput); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -92,6 +93,7 @@ Flags:
   --since <dur>   time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
   --graph         show the full activity graph drill-down
   --bucket <b>    activity graph bucket: day, week, month (default day)
+  --json          emit machine-readable JSON instead of the human dashboard
   --no-color      plain output with no ANSI escape codes
   --version       print version and exit
 
@@ -99,7 +101,7 @@ Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -159,21 +161,26 @@ func run(stdout io.Writer, since string, color bool, view, bucket string) error 
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
 	m.Streak = aggregate.Streak(m.Days)
-	if view == "graph" {
+	buckets := aggregate.BucketCounts(m.Days, bucket)
+	if !jsonOutput && view == "graph" {
 		render.Graph(stdout, render.GraphModel{
 			RangeLabel:   m.RangeLabel,
 			Bucket:       bucket,
 			Days:         m.Days,
-			Buckets:      aggregate.BucketCounts(m.Days, bucket),
+			Buckets:      buckets,
 			TotalCommits: m.TotalCommits,
 			Streak:       m.Streak,
 			Now:          now,
 		}, color)
 		return nil
 	}
+
 	m.Contributors = agg.TopContributors(sinceTime, now, 5)
 	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
 	m.Growth = agg.BuildGrowth(now)
+	if jsonOutput {
+		return render.JSON(stdout, m, bucket, buckets)
+	}
 
 	render.Dashboard(stdout, m, color)
 	return nil

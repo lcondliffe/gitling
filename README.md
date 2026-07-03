@@ -55,6 +55,7 @@ gitling                  # default dashboard (last 14 weeks)
 gitling --since 30d      # override the range for all sections (d, w, mo, y)
 gitling graph --since 1y # focused activity drill-down
 gitling --graph --bucket week --since 1y
+gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
 ```
 
@@ -71,7 +72,8 @@ Color is also auto-disabled when stdout isn't a terminal or `NO_COLOR` is set.
   keyed by the last HEAD seen. Each run only walks commits newer than the last,
   making repeat runs effectively instant.
 - **render** draws everything with 256-color ANSI chosen to read on both light
-  and dark backgrounds.
+  and dark backgrounds, or emits the same model as indented JSON when `--json`
+  is set.
 
 The layers are cleanly separated: the git backend (currently shell-out, a
 go-git backend could replace it) and the cache (gob, could become sqlite) are
