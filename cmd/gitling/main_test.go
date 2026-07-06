@@ -55,6 +55,32 @@ func TestSubcommandView(t *testing.T) {
 	}
 }
 
+func TestSelectView(t *testing.T) {
+	ok := []struct {
+		requested []string
+		want      string
+	}{
+		{nil, "dashboard"},
+		{[]string{"graph"}, "graph"},
+		{[]string{"churn"}, "churn"},
+		{[]string{"churn", "churn"}, "churn"}, // flag + subcommand naming the same view
+	}
+	for _, c := range ok {
+		got, err := selectView(c.requested)
+		if err != nil || got != c.want {
+			t.Errorf("selectView(%v) = (%q, %v), want (%q, nil)", c.requested, got, err, c.want)
+		}
+	}
+	for _, requested := range [][]string{
+		{"graph", "churn"},
+		{"churn", "graph"},
+	} {
+		if got, err := selectView(requested); err == nil {
+			t.Errorf("selectView(%v) = (%q, nil), want error", requested, got)
+		}
+	}
+}
+
 func TestValidateBucket(t *testing.T) {
 	for _, in := range []string{"day", "week", "month"} {
 		if err := validateBucket(in); err != nil {
