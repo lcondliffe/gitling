@@ -41,6 +41,26 @@ type GraphModel struct {
 	Now          time.Time
 }
 
+// ChurnModel is the focused file-churn drill-down view.
+type ChurnModel struct {
+	RangeLabel string
+	Files      []aggregate.FileChurn
+	Now        time.Time
+}
+
+// ContributorsModel is the focused contributor drill-down view.
+type ContributorsModel struct {
+	RangeLabel   string
+	Contributors []aggregate.Contributor
+	Now          time.Time
+}
+
+// BranchesModel is the focused branch-overview drill-down view.
+type BranchesModel struct {
+	Branches []gitdata.Branch
+	Now      time.Time
+}
+
 // SGR color codes. cText ("") means the terminal's default foreground, which is
 // the background-agnostic choice for body text.
 const (
@@ -132,6 +152,195 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 		fmt.Fprintf(w, "    %s   %s\n", count, periodLabel(b, m.Bucket))
 	}
 	fmt.Fprintln(w)
+}
+
+// Contributors prints a focused contributor drill-down: every author with
+// commits in range, ranked, with a bar and exact counts — the full list behind
+// the dashboard's top-5 panel. It reuses the dashboard's contributor renderer,
+// then adds a totals summary.
+func Contributors(w io.Writer, m ContributorsModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "Contributors", m.RangeLabel)
+	fmt.Fprintln(w)
+	p.contributors(w, m.Contributors)
+
+	if len(m.Contributors) > 0 {
+		total := 0
+		for _, c := range m.Contributors {
+			total += c.Commits
+		}
+		fmt.Fprintln(w)
+		summary := fmt.Sprintf("%d %s · %d %s",
+			len(m.Contributors), plural(len(m.Contributors), "contributor", "contributors"),
+			total, plural(total, "commit", "commits"))
+		fmt.Fprintln(w, "  "+p.c(cLabel, summary))
+	}
+	fmt.Fprintln(w)
+}
+
+// Churn prints a focused file-churn drill-down: every file touched in range,
+// ranked by the number of commits touching it, with a bar and exact counts.
+func Churn(w io.Writer, m ChurnModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "File churn", m.RangeLabel)
+	fmt.Fprintln(w)
+
+	if len(m.Files) == 0 {
+		fmt.Fprintln(w, "  "+p.c(cLabel, "no commits in range"))
+		fmt.Fprintln(w)
+		return
+	}
+
+	countW := 0
+	for _, f := range m.Files {
+		if n := len(strconv.Itoa(f.Commits)); n > countW {
+			countW = n
+		}
+	}
+	// Files arrive sorted by descending commit count, so the first is the peak.
+	maxC := m.Files[0].Commits
+	for _, f := range m.Files {
+		filled := 0
+		if maxC > 0 {
+			filled = int(float64(f.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+		}
+		if filled < 1 {
+			filled = 1 // always show a sliver so every file reads as present
+		}
+		if filled > contribBarW {
+			filled = contribBarW
+		}
+		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
+			strings.Repeat(" ", contribBarW-filled)
+		count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
+		fmt.Fprintf(w, "  %s   %s   %s\n", bar, count, f.Path)
+	}
+
+	fmt.Fprintln(w)
+	summary := fmt.Sprintf("%d %s touched", len(m.Files), plural(len(m.Files), "file", "files"))
+	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
+	fmt.Fprintln(w)
+}
+
+// Branches prints a focused branch overview: local branches ranked by most
+// recent commit, each with ahead/behind vs its upstream (or the default branch),
+// how long ago the tip was committed, and the tip author.
+func Branches(w io.Writer, m BranchesModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "Branches", fmt.Sprintf("%d %s", len(m.Branches), plural(len(m.Branches), "branch", "branches")))
+	fmt.Fprintln(w)
+
+	if len(m.Branches) == 0 {
+		fmt.Fprintln(w, "  "+p.c(cLabel, "no local branches"))
+		fmt.Fprintln(w)
+		return
+	}
+
+	nameW, trackW, dateW := 0, 0, 0
+	for _, b := range m.Branches {
+		if n := runeLen(b.Name); n > nameW {
+			nameW = n
+		}
+		if n := runeLen(branchTrack(b)); n > trackW {
+			trackW = n
+		}
+		if n := runeLen(humanAgo(b.LastCommit, m.Now)); n > dateW {
+			dateW = n
+		}
+	}
+	if nameW > 32 {
+		nameW = 32
+	}
+
+	for _, b := range m.Branches {
+		marker := "  "
+		if b.IsHead {
+			marker = p.c(cAccent, "*") + " "
+		}
+		name := truncate(b.Name, nameW)
+		namePad := strings.Repeat(" ", nameW-runeLen(name))
+		nameCol := name
+		if b.IsHead {
+			nameCol = p.c(cBright, name)
+		}
+		track := branchTrack(b)
+		trackPad := strings.Repeat(" ", trackW-runeLen(track))
+		date := humanAgo(b.LastCommit, m.Now)
+		datePad := strings.Repeat(" ", dateW-runeLen(date))
+
+		line := fmt.Sprintf("%s%s%s   %s%s   %s%s   %s",
+			marker, nameCol, namePad,
+			p.branchTrack(b), trackPad,
+			p.c(cLabel, date), datePad,
+			p.c(cLabel, b.LastAuthor))
+		// Note the comparison base only when it's the default-branch fallback
+		// (an upstream is implied and doesn't need spelling out).
+		if b.HasCompare && b.Upstream == "" && b.CompareRef != "" {
+			line += "   " + p.c(cLabel, "vs "+b.CompareRef)
+		}
+		fmt.Fprintln(w, "  "+strings.TrimRight(line, " "))
+	}
+	fmt.Fprintln(w)
+}
+
+// branchTrack is the plain (uncolored) ahead/behind cell, used for width.
+func branchTrack(b gitdata.Branch) string {
+	switch {
+	case b.Gone:
+		return "gone"
+	case b.HasCompare:
+		return fmt.Sprintf("↑%d ↓%d", b.Ahead, b.Behind)
+	default:
+		return "—"
+	}
+}
+
+// branchTrack (method) is the colored version of the same cell; it has the same
+// visible width as the plain form so column padding still lines up.
+func (p palette) branchTrack(b gitdata.Branch) string {
+	switch {
+	case b.Gone:
+		return p.c(cAmber, "gone")
+	case b.HasCompare:
+		ahead := p.c(cLabel, fmt.Sprintf("↑%d", b.Ahead))
+		if b.Ahead > 0 {
+			ahead = p.c(cAccent, fmt.Sprintf("↑%d", b.Ahead))
+		}
+		return ahead + " " + p.c(cLabel, fmt.Sprintf("↓%d", b.Behind))
+	default:
+		return p.c(cLabel, "—")
+	}
+}
+
+// humanAgo renders a compact "time since" label for a branch tip.
+func humanAgo(t, now time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	d := now.Sub(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo ago", int(d.Hours()/24/30))
+	default:
+		return fmt.Sprintf("%dy ago", int(d.Hours()/24/365))
+	}
 }
 
 func (p palette) header(w io.Writer, label, suffix string) {

@@ -63,6 +63,102 @@ func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
 	}
 }
 
+func TestChurnRanksFilesWithCountsAndSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{
+		RangeLabel: "last 1y",
+		Files: []aggregate.FileChurn{
+			{Path: "cmd/gitling/main.go", Commits: 8},
+			{Path: "internal/render/render.go", Commits: 3},
+			{Path: "go.mod", Commits: 1},
+		},
+		Now: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{"FILE CHURN", "last 1y", "cmd/gitling/main.go", "3 files touched"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Churn output missing %q:\n%s", want, out)
+		}
+	}
+	// Highest-churn file must render before the lowest.
+	if strings.Index(out, "cmd/gitling/main.go") > strings.Index(out, "go.mod") {
+		t.Fatalf("Churn should list files by descending commit count:\n%s", out)
+	}
+}
+
+func TestChurnNoCommitsShowsMessage(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{RangeLabel: "last 2d", Files: nil}, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "no commits in range") {
+		t.Fatalf("Churn empty range output missing message:\n%s", out)
+	}
+	if strings.Contains(out, "files touched") {
+		t.Fatalf("Churn empty range should not print a file-count summary:\n%s", out)
+	}
+}
+
+func TestChurnSingularFileSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{
+		RangeLabel: "last 2d",
+		Files:      []aggregate.FileChurn{{Path: "go.mod", Commits: 1}},
+	}, false)
+
+	if out := buf.String(); !strings.Contains(out, "1 file touched") {
+		t.Fatalf("Churn should use singular 'file' for one result:\n%s", out)
+	}
+}
+
+func TestContributorsRanksAuthorsWithSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{
+		RangeLabel: "last 1y",
+		Contributors: []aggregate.Contributor{
+			{Name: "Ada Lovelace", Email: "ada@example.com", Commits: 8},
+			{Name: "Alan Turing", Email: "alan@example.com", Commits: 3},
+		},
+		Now: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{"CONTRIBUTORS", "last 1y", "Ada Lovelace", "Alan Turing", "2 contributors · 11 commits"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Contributors output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Ada Lovelace") > strings.Index(out, "Alan Turing") {
+		t.Fatalf("Contributors should list authors by descending commit count:\n%s", out)
+	}
+}
+
+func TestContributorsSingularSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{
+		RangeLabel:   "last 1y",
+		Contributors: []aggregate.Contributor{{Name: "Ada", Email: "ada@example.com", Commits: 1}},
+	}, false)
+
+	if out := buf.String(); !strings.Contains(out, "1 contributor · 1 commit") {
+		t.Fatalf("Contributors should use singular nouns for a lone author with one commit:\n%s", out)
+	}
+}
+
+func TestContributorsNoCommitsShowsMessage(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{RangeLabel: "last 2d", Contributors: nil}, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "no commits in range") {
+		t.Fatalf("Contributors empty range output missing message:\n%s", out)
+	}
+	if strings.Contains(out, "contributor") {
+		t.Fatalf("Contributors empty range should not print a summary line:\n%s", out)
+	}
+}
+
 func TestJSONIncludesDashboardData(t *testing.T) {
 	start := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	model := Model{
@@ -141,6 +237,68 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	}
 	if _, ok := hotFile["Path"]; ok {
 		t.Fatalf("hot file leaked PascalCase key: %#v", hotFile)
+	}
+}
+
+func TestBranchesRendering(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Branches(&buf, BranchesModel{
+		Now: now,
+		Branches: []gitdata.Branch{
+			{Name: "main", IsHead: true, Upstream: "origin/main", HasCompare: true, CompareRef: "origin/main", LastCommit: now.Add(-2 * time.Hour), LastAuthor: "Ada"},
+			{Name: "feature", Upstream: "", HasCompare: true, CompareRef: "main", Ahead: 5, Behind: 1, LastCommit: now.Add(-3 * 24 * time.Hour), LastAuthor: "Alan"},
+			{Name: "stale", Gone: true, LastCommit: now.Add(-20 * 24 * time.Hour), LastAuthor: "Grace"},
+		},
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{
+		"BRANCHES", "3 branches",
+		"* main",  // head marker
+		"↑5 ↓1",   // feature ahead/behind
+		"gone",    // stale upstream
+		"vs main", // fallback comparison note for the no-upstream branch
+		"2h ago", "3d ago", "20d ago",
+		"Ada", "Alan", "Grace",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Branches output missing %q:\n%s", want, out)
+		}
+	}
+	// The upstream-tracked branch should not carry a redundant "vs origin/main".
+	if strings.Contains(out, "vs origin/main") {
+		t.Fatalf("Branches should not spell out the upstream comparison:\n%s", out)
+	}
+}
+
+func TestBranchesEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	Branches(&buf, BranchesModel{Now: time.Now()}, false)
+	if out := buf.String(); !strings.Contains(out, "no local branches") {
+		t.Fatalf("empty Branches output missing message:\n%s", out)
+	}
+}
+
+func TestHumanAgo(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		t    time.Time
+		want string
+	}{
+		{time.Time{}, "—"},
+		{now.Add(10 * time.Second), "just now"}, // future clamps to now
+		{now.Add(-30 * time.Second), "just now"},
+		{now.Add(-5 * time.Minute), "5m ago"},
+		{now.Add(-3 * time.Hour), "3h ago"},
+		{now.Add(-2 * 24 * time.Hour), "2d ago"},
+		{now.Add(-45 * 24 * time.Hour), "1mo ago"},
+		{now.Add(-800 * 24 * time.Hour), "2y ago"},
+	}
+	for _, c := range cases {
+		if got := humanAgo(c.t, now); got != c.want {
+			t.Errorf("humanAgo(%v) = %q, want %q", c.t, got, c.want)
+		}
 	}
 }
 
