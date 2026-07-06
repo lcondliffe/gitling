@@ -63,6 +63,53 @@ func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
 	}
 }
 
+func TestContributorsRanksAuthorsWithSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{
+		RangeLabel: "last 1y",
+		Contributors: []aggregate.Contributor{
+			{Name: "Ada Lovelace", Email: "ada@example.com", Commits: 8},
+			{Name: "Alan Turing", Email: "alan@example.com", Commits: 3},
+		},
+		Now: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{"CONTRIBUTORS", "last 1y", "Ada Lovelace", "Alan Turing", "2 contributors · 11 commits"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Contributors output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Ada Lovelace") > strings.Index(out, "Alan Turing") {
+		t.Fatalf("Contributors should list authors by descending commit count:\n%s", out)
+	}
+}
+
+func TestContributorsSingularSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{
+		RangeLabel:   "last 1y",
+		Contributors: []aggregate.Contributor{{Name: "Ada", Email: "ada@example.com", Commits: 1}},
+	}, false)
+
+	if out := buf.String(); !strings.Contains(out, "1 contributor · 1 commit") {
+		t.Fatalf("Contributors should use singular nouns for a lone author with one commit:\n%s", out)
+	}
+}
+
+func TestContributorsNoCommitsShowsMessage(t *testing.T) {
+	var buf bytes.Buffer
+	Contributors(&buf, ContributorsModel{RangeLabel: "last 2d", Contributors: nil}, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "no commits in range") {
+		t.Fatalf("Contributors empty range output missing message:\n%s", out)
+	}
+	if strings.Contains(out, "contributor") {
+		t.Fatalf("Contributors empty range should not print a summary line:\n%s", out)
+	}
+}
+
 func TestJSONIncludesDashboardData(t *testing.T) {
 	start := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	model := Model{
