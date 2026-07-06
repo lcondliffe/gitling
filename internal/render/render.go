@@ -48,6 +48,13 @@ type ChurnModel struct {
 	Now        time.Time
 }
 
+// ContributorsModel is the focused contributor drill-down view.
+type ContributorsModel struct {
+	RangeLabel   string
+	Contributors []aggregate.Contributor
+	Now          time.Time
+}
+
 // SGR color codes. cText ("") means the terminal's default foreground, which is
 // the background-agnostic choice for body text.
 const (
@@ -137,6 +144,32 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 	for _, b := range m.Buckets {
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, b.Count))
 		fmt.Fprintf(w, "    %s   %s\n", count, periodLabel(b, m.Bucket))
+	}
+	fmt.Fprintln(w)
+}
+
+// Contributors prints a focused contributor drill-down: every author with
+// commits in range, ranked, with a bar and exact counts — the full list behind
+// the dashboard's top-5 panel. It reuses the dashboard's contributor renderer,
+// then adds a totals summary.
+func Contributors(w io.Writer, m ContributorsModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "Contributors", m.RangeLabel)
+	fmt.Fprintln(w)
+	p.contributors(w, m.Contributors)
+
+	if len(m.Contributors) > 0 {
+		total := 0
+		for _, c := range m.Contributors {
+			total += c.Commits
+		}
+		fmt.Fprintln(w)
+		summary := fmt.Sprintf("%d %s · %d %s",
+			len(m.Contributors), plural(len(m.Contributors), "contributor", "contributors"),
+			total, plural(total, "commit", "commits"))
+		fmt.Fprintln(w, "  "+p.c(cLabel, summary))
 	}
 	fmt.Fprintln(w)
 }

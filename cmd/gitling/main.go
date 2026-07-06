@@ -54,6 +54,7 @@ func main() {
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
+	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -72,6 +73,9 @@ func main() {
 	}
 	if *churn {
 		requested = append(requested, "churn")
+	}
+	if *contributors {
+		requested = append(requested, "contributors")
 	}
 	// A subcommand may also appear after flags (e.g. `gitling --since 1y churn`).
 	if flag.NArg() > 0 {
@@ -105,15 +109,17 @@ Usage:
   gitling [flags]
   gitling graph [flags]
   gitling churn [flags]
+  gitling contributors [flags]
 
 Flags:
-  --since <dur>   time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
-  --graph         show the full activity graph drill-down
-  --churn         show the full file churn drill-down
-  --bucket <b>    activity graph bucket: day, week, month (default day)
-  --json          emit machine-readable JSON instead of the human dashboard
-  --no-color      plain output with no ANSI escape codes
-  --version       print version and exit
+  --since <dur>    time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
+  --graph          show the full activity graph drill-down
+  --churn          show the full file churn drill-down
+  --contributors   show the full contributor drill-down
+  --bucket <b>     activity graph bucket: day, week, month (default day)
+  --json           emit machine-readable JSON instead of the human dashboard
+  --no-color       plain output with no ANSI escape codes
+  --version        print version and exit
 
 Run inside a git repository.
 `)
@@ -200,6 +206,14 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		}, color)
 		return nil
 	}
+	if !jsonOutput && view == "contributors" {
+		render.Contributors(stdout, render.ContributorsModel{
+			RangeLabel:   m.RangeLabel,
+			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors
+			Now:          now,
+		}, color)
+		return nil
+	}
 
 	m.Contributors = agg.TopContributors(sinceTime, now, 5)
 	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
@@ -234,6 +248,8 @@ func subcommandView(name string) (string, bool) {
 		return "graph", true
 	case "churn":
 		return "churn", true
+	case "contributors":
+		return "contributors", true
 	default:
 		return "", false
 	}
