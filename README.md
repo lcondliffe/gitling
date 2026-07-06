@@ -56,6 +56,7 @@ gitling --since 30d      # override the range for all sections (d, w, mo, y)
 gitling graph --since 1y # focused activity drill-down
 gitling --graph --bucket week --since 1y
 gitling contributors     # focused contributor drill-down (all authors, ranked)
+gitling contributors --since 1y   # ranked over a custom window (--since drives every section)
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
 ```
