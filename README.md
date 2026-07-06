@@ -103,8 +103,8 @@ git push origin v0.1.0
 
 ## Status
 
-v0.1. The v0.2 drill-down subcommands have landed — each available as a
-subcommand or the matching `--flag`:
+v0.2. The drill-down subcommands have landed — each available as a
+subcommand or the matching `--flag` (naming two different views errors):
 
 - `graph` — focused activity view with day/week/month buckets.
 - `churn` — every file touched in range, ranked by commit count.
