@@ -55,6 +55,9 @@ gitling                  # default dashboard (last 14 weeks)
 gitling --since 30d      # override the range for all sections (d, w, mo, y)
 gitling graph --since 1y # focused activity drill-down
 gitling --graph --bucket week --since 1y
+gitling churn --since 1y # file churn: all files, ranked by commit count
+gitling contributors     # all authors, ranked (--since sets the window)
+gitling branches         # branch overview: ahead/behind, last commit, author
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
 ```
@@ -100,7 +103,11 @@ git push origin v0.1.0
 
 ## Status
 
-v0.1. Drill-down views are starting to land: `gitling graph` / `--graph`
-shows a focused activity view with day/week/month buckets. Other drill-downs
-(`--churn`, `--contributors`, `--branches`) are reserved but not yet
-implemented.
+v0.2. The drill-down subcommands have landed — each available as a
+subcommand or the matching `--flag` (naming two different views errors):
+
+- `graph` — focused activity view with day/week/month buckets.
+- `churn` — every file touched in range, ranked by commit count.
+- `contributors` — all authors ranked (beyond the dashboard's top 5).
+- `branches` — per-branch ahead/behind vs upstream (or the default branch),
+  last-commit age, and tip author.
