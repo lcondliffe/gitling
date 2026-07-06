@@ -63,6 +63,55 @@ func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
 	}
 }
 
+func TestChurnRanksFilesWithCountsAndSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{
+		RangeLabel: "last 1y",
+		Files: []aggregate.FileChurn{
+			{Path: "cmd/gitling/main.go", Commits: 8},
+			{Path: "internal/render/render.go", Commits: 3},
+			{Path: "go.mod", Commits: 1},
+		},
+		Now: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{"FILE CHURN", "last 1y", "cmd/gitling/main.go", "3 files touched"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Churn output missing %q:\n%s", want, out)
+		}
+	}
+	// Highest-churn file must render before the lowest.
+	if strings.Index(out, "cmd/gitling/main.go") > strings.Index(out, "go.mod") {
+		t.Fatalf("Churn should list files by descending commit count:\n%s", out)
+	}
+}
+
+func TestChurnNoCommitsShowsMessage(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{RangeLabel: "last 2d", Files: nil}, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "no commits in range") {
+		t.Fatalf("Churn empty range output missing message:\n%s", out)
+	}
+	if strings.Contains(out, "files touched") {
+		t.Fatalf("Churn empty range should not print a file-count summary:\n%s", out)
+	}
+}
+
+func TestChurnSingularFileSummary(t *testing.T) {
+	var buf bytes.Buffer
+	Churn(&buf, ChurnModel{
+		RangeLabel: "last 2d",
+		Files:      []aggregate.FileChurn{{Path: "go.mod", Commits: 1}},
+	}, false)
+
+	if out := buf.String(); !strings.Contains(out, "1 file touched") {
+		t.Fatalf("Churn should use singular 'file' for one result:\n%s", out)
+	}
+}
+
 func TestJSONIncludesDashboardData(t *testing.T) {
 	start := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	model := Model{

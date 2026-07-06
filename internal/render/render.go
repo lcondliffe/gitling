@@ -41,6 +41,13 @@ type GraphModel struct {
 	Now          time.Time
 }
 
+// ChurnModel is the focused file-churn drill-down view.
+type ChurnModel struct {
+	RangeLabel string
+	Files      []aggregate.FileChurn
+	Now        time.Time
+}
+
 // SGR color codes. cText ("") means the terminal's default foreground, which is
 // the background-agnostic choice for body text.
 const (
@@ -131,6 +138,52 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, b.Count))
 		fmt.Fprintf(w, "    %s   %s\n", count, periodLabel(b, m.Bucket))
 	}
+	fmt.Fprintln(w)
+}
+
+// Churn prints a focused file-churn drill-down: every file touched in range,
+// ranked by the number of commits touching it, with a bar and exact counts.
+func Churn(w io.Writer, m ChurnModel, color bool) {
+	p := palette{on: color}
+
+	fmt.Fprintln(w)
+	p.header(w, "File churn", m.RangeLabel)
+	fmt.Fprintln(w)
+
+	if len(m.Files) == 0 {
+		fmt.Fprintln(w, "  "+p.c(cLabel, "no commits in range"))
+		fmt.Fprintln(w)
+		return
+	}
+
+	countW := 0
+	for _, f := range m.Files {
+		if n := len(strconv.Itoa(f.Commits)); n > countW {
+			countW = n
+		}
+	}
+	// Files arrive sorted by descending commit count, so the first is the peak.
+	maxC := m.Files[0].Commits
+	for _, f := range m.Files {
+		filled := 0
+		if maxC > 0 {
+			filled = int(float64(f.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+		}
+		if filled < 1 {
+			filled = 1 // always show a sliver so every file reads as present
+		}
+		if filled > contribBarW {
+			filled = contribBarW
+		}
+		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
+			strings.Repeat(" ", contribBarW-filled)
+		count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
+		fmt.Fprintf(w, "  %s   %s   %s\n", bar, count, f.Path)
+	}
+
+	fmt.Fprintln(w)
+	summary := fmt.Sprintf("%d %s touched", len(m.Files), plural(len(m.Files), "file", "files"))
+	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
 	fmt.Fprintln(w)
 }
 
