@@ -1,6 +1,7 @@
 package gitdata
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,6 +60,65 @@ func TestCleanPath(t *testing.T) {
 		if got := cleanPath(in); got != want {
 			t.Errorf("cleanPath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestParseTrack(t *testing.T) {
+	cases := []struct {
+		in            string
+		ahead, behind int
+	}{
+		{"", 0, 0},
+		{"ahead 1", 1, 0},
+		{"behind 2", 0, 2},
+		{"ahead 3, behind 4", 3, 4},
+		{"behind 5, ahead 6", 6, 5},
+	}
+	for _, c := range cases {
+		a, b := parseTrack(c.in)
+		if a != c.ahead || b != c.behind {
+			t.Errorf("parseTrack(%q) = (%d, %d), want (%d, %d)", c.in, a, b, c.ahead, c.behind)
+		}
+	}
+}
+
+func TestParseBranches(t *testing.T) {
+	const us = "\x1f"
+	// HEAD marker, name, upstream, track, committerdate(unix), authorname
+	sample := strings.Join([]string{"*", "main", "origin/main", "", "1700000000", "Ada"}, us) + "\n" +
+		strings.Join([]string{" ", "feature", "origin/feature", "ahead 2, behind 1", "1700100000", "Alan"}, us) + "\n" +
+		strings.Join([]string{" ", "stale", "origin/stale", "gone", "1700200000", "Grace"}, us) + "\n" +
+		strings.Join([]string{" ", "local-only", "", "", "1700300000", "Linus"}, us) + "\n"
+
+	got := parseBranches(sample)
+	if len(got) != 4 {
+		t.Fatalf("got %d branches, want 4", len(got))
+	}
+
+	main := got[0]
+	if !main.IsHead || main.Name != "main" || main.Upstream != "origin/main" {
+		t.Errorf("main = %+v", main)
+	}
+	if !main.HasCompare || main.Ahead != 0 || main.Behind != 0 || main.CompareRef != "origin/main" {
+		t.Errorf("main should compare in-sync against upstream: %+v", main)
+	}
+	if !main.LastCommit.Equal(time.Unix(1700000000, 0)) || main.LastAuthor != "Ada" {
+		t.Errorf("main tip = %v / %q", main.LastCommit, main.LastAuthor)
+	}
+
+	feature := got[1]
+	if feature.IsHead || feature.Ahead != 2 || feature.Behind != 1 || !feature.HasCompare {
+		t.Errorf("feature = %+v", feature)
+	}
+
+	stale := got[2]
+	if !stale.Gone || stale.HasCompare {
+		t.Errorf("stale should be gone with no comparison: %+v", stale)
+	}
+
+	local := got[3]
+	if local.HasCompare || local.Gone || local.Upstream != "" {
+		t.Errorf("local-only should have no upstream and no comparison yet: %+v", local)
 	}
 }
 

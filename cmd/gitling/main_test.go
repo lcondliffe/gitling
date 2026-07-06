@@ -41,14 +41,14 @@ func TestRangeLabel(t *testing.T) {
 }
 
 func TestSubcommandView(t *testing.T) {
-	views := map[string]string{"graph": "graph", "churn": "churn", "contributors": "contributors"}
+	views := map[string]string{"graph": "graph", "churn": "churn", "contributors": "contributors", "branches": "branches"}
 	for name, want := range views {
 		got, ok := subcommandView(name)
 		if !ok || got != want {
 			t.Errorf("subcommandView(%q) = (%q, %v), want (%q, true)", name, got, ok, want)
 		}
 	}
-	for _, name := range []string{"dashboard", "branches", "", "GRAPH"} {
+	for _, name := range []string{"dashboard", "", "GRAPH", "BRANCHES"} {
 		if got, ok := subcommandView(name); ok {
 			t.Errorf("subcommandView(%q) = (%q, true), want (_, false)", name, got)
 		}
@@ -75,6 +75,7 @@ func TestSelectView(t *testing.T) {
 		{"graph", "churn"},
 		{"churn", "graph"},
 		{"graph", "contributors"},
+		{"branches", "graph"},
 	} {
 		if got, err := selectView(requested); err == nil {
 			t.Errorf("selectView(%v) = (%q, nil), want error", requested, got)

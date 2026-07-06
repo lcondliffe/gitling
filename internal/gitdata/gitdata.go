@@ -52,6 +52,23 @@ type Vitals struct {
 	BranchCount int
 }
 
+// Branch is one local branch's overview state for the branches drill-down.
+// Ahead/Behind are only meaningful when HasCompare is true; CompareRef names
+// what they are measured against (the branch's upstream, or the default branch
+// as a fallback for branches with no upstream configured).
+type Branch struct {
+	Name       string
+	IsHead     bool      // the currently checked-out branch
+	Upstream   string    // tracking ref (short), empty when none is configured
+	Gone       bool      // upstream configured but no longer exists
+	Ahead      int       // commits on this branch not on CompareRef
+	Behind     int       // commits on CompareRef not on this branch
+	HasCompare bool      // whether Ahead/Behind (and CompareRef) are populated
+	CompareRef string    // upstream or fallback base branch
+	LastCommit time.Time // committer date of the branch tip
+	LastAuthor string    // author name of the branch tip
+}
+
 // Repo is a handle to a git repository, identified by any path inside its
 // working tree.
 type Repo struct {
@@ -145,6 +162,117 @@ func (r *Repo) Vitals() (Vitals, error) {
 	}
 
 	return v, nil
+}
+
+// Branches returns the local branches, most recently committed first, each with
+// its upstream tracking state, last-commit date, and last author. Branches with
+// no upstream are compared against the repository's default branch instead, so
+// feature branches still show a meaningful ahead/behind.
+func (r *Repo) Branches() ([]Branch, error) {
+	// One for-each-ref pass covers name, upstream, ahead/behind vs upstream,
+	// tip date, and tip author. Fields are separated by unitSep (never present
+	// in refnames or author names), records by newline.
+	format := strings.Join([]string{
+		"%(HEAD)", "%(refname:short)", "%(upstream:short)",
+		"%(upstream:track,nobracket)", "%(committerdate:unix)", "%(authorname)",
+	}, unitSep)
+	out, err := r.run("for-each-ref", "--sort=-committerdate", "--format="+format, "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	branches := parseBranches(out)
+
+	// Fallback: for branches without an upstream, compare against the default
+	// branch so they aren't left with a bare "—".
+	base := r.defaultBranch()
+	if base != "" {
+		for i := range branches {
+			b := &branches[i]
+			if b.HasCompare || b.Gone || b.Name == base {
+				continue
+			}
+			// left-right count of base...branch is "<behind>\t<ahead>".
+			if out, err := r.run("rev-list", "--left-right", "--count", base+"..."+b.Name); err == nil {
+				if f := strings.Fields(out); len(f) == 2 {
+					b.Behind, _ = strconv.Atoi(f[0])
+					b.Ahead, _ = strconv.Atoi(f[1])
+					b.HasCompare = true
+					b.CompareRef = base
+				}
+			}
+		}
+	}
+	return branches, nil
+}
+
+// defaultBranch resolves the repository's default branch for ahead/behind
+// fallback: the remote's HEAD when known, otherwise a local main/master.
+func (r *Repo) defaultBranch() string {
+	if out, err := r.run("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if s := strings.TrimSpace(out); s != "" {
+			return s
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if _, err := r.run("rev-parse", "--verify", "--quiet", "refs/heads/"+name); err == nil {
+			return name
+		}
+	}
+	return ""
+}
+
+// parseBranches parses the for-each-ref output produced by Branches. Ahead/behind
+// vs the upstream come straight from %(upstream:track); the default-branch
+// fallback is layered on by the caller.
+func parseBranches(out string) []Branch {
+	var branches []Branch
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		f := strings.Split(line, unitSep)
+		if len(f) < 6 {
+			continue
+		}
+		b := Branch{
+			IsHead:     strings.TrimSpace(f[0]) == "*",
+			Name:       f[1],
+			Upstream:   f[2],
+			LastAuthor: f[5],
+		}
+		switch track := strings.TrimSpace(f[3]); {
+		case track == "gone":
+			b.Gone = true
+		case b.Upstream != "":
+			b.Ahead, b.Behind = parseTrack(track)
+			b.HasCompare = true
+			b.CompareRef = b.Upstream
+		}
+		if t, err := parseUnix(f[4]); err == nil {
+			b.LastCommit = t
+		}
+		branches = append(branches, b)
+	}
+	return branches
+}
+
+// parseTrack reads git's "%(upstream:track,nobracket)" string, e.g.
+// "ahead 1, behind 2", "ahead 3", "behind 4", or "" (in sync).
+func parseTrack(s string) (ahead, behind int) {
+	for _, part := range strings.Split(s, ",") {
+		fields := strings.Fields(part)
+		if len(fields) != 2 {
+			continue
+		}
+		n, _ := strconv.Atoi(fields[1])
+		switch fields[0] {
+		case "ahead":
+			ahead = n
+		case "behind":
+			behind = n
+		}
+	}
+	return ahead, behind
 }
 
 // Commits returns non-merge commits in revRange (e.g. "abc123..HEAD"), or the

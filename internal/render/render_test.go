@@ -240,6 +240,68 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	}
 }
 
+func TestBranchesRendering(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Branches(&buf, BranchesModel{
+		Now: now,
+		Branches: []gitdata.Branch{
+			{Name: "main", IsHead: true, Upstream: "origin/main", HasCompare: true, CompareRef: "origin/main", LastCommit: now.Add(-2 * time.Hour), LastAuthor: "Ada"},
+			{Name: "feature", Upstream: "", HasCompare: true, CompareRef: "main", Ahead: 5, Behind: 1, LastCommit: now.Add(-3 * 24 * time.Hour), LastAuthor: "Alan"},
+			{Name: "stale", Gone: true, LastCommit: now.Add(-20 * 24 * time.Hour), LastAuthor: "Grace"},
+		},
+	}, false)
+
+	out := buf.String()
+	for _, want := range []string{
+		"BRANCHES", "3 branches",
+		"* main",  // head marker
+		"↑5 ↓1",   // feature ahead/behind
+		"gone",    // stale upstream
+		"vs main", // fallback comparison note for the no-upstream branch
+		"2h ago", "3d ago", "20d ago",
+		"Ada", "Alan", "Grace",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Branches output missing %q:\n%s", want, out)
+		}
+	}
+	// The upstream-tracked branch should not carry a redundant "vs origin/main".
+	if strings.Contains(out, "vs origin/main") {
+		t.Fatalf("Branches should not spell out the upstream comparison:\n%s", out)
+	}
+}
+
+func TestBranchesEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	Branches(&buf, BranchesModel{Now: time.Now()}, false)
+	if out := buf.String(); !strings.Contains(out, "no local branches") {
+		t.Fatalf("empty Branches output missing message:\n%s", out)
+	}
+}
+
+func TestHumanAgo(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		t    time.Time
+		want string
+	}{
+		{time.Time{}, "—"},
+		{now.Add(10 * time.Second), "just now"}, // future clamps to now
+		{now.Add(-30 * time.Second), "just now"},
+		{now.Add(-5 * time.Minute), "5m ago"},
+		{now.Add(-3 * time.Hour), "3h ago"},
+		{now.Add(-2 * 24 * time.Hour), "2d ago"},
+		{now.Add(-45 * 24 * time.Hour), "1mo ago"},
+		{now.Add(-800 * 24 * time.Hour), "2y ago"},
+	}
+	for _, c := range cases {
+		if got := humanAgo(c.t, now); got != c.want {
+			t.Errorf("humanAgo(%v) = %q, want %q", c.t, got, c.want)
+		}
+	}
+}
+
 func TestPeriodLabel(t *testing.T) {
 	start := time.Date(2024, 6, 3, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 9, 0, 0, 0, 0, time.UTC)

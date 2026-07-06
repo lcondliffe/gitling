@@ -55,6 +55,7 @@ func main() {
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
+	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -76,6 +77,9 @@ func main() {
 	}
 	if *contributors {
 		requested = append(requested, "contributors")
+	}
+	if *branches {
+		requested = append(requested, "branches")
 	}
 	// A subcommand may also appear after flags (e.g. `gitling --since 1y churn`).
 	if flag.NArg() > 0 {
@@ -110,12 +114,14 @@ Usage:
   gitling graph [flags]
   gitling churn [flags]
   gitling contributors [flags]
+  gitling branches [flags]
 
 Flags:
   --since <dur>    time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
   --graph          show the full activity graph drill-down
   --churn          show the full file churn drill-down
   --contributors   show the full contributor drill-down
+  --branches       show the branch overview drill-down
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --json           emit machine-readable JSON instead of the human dashboard
   --no-color       plain output with no ANSI escape codes
@@ -143,6 +149,17 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 	}
 	now := time.Now()
 	sinceTime := now.AddDate(0, 0, -days)
+
+	// The branches view is live git state, independent of the commit-history
+	// aggregate, so serve it before the (potentially expensive) history walk.
+	if !jsonOutput && view == "branches" {
+		branches, err := repo.Branches()
+		if err != nil {
+			return err
+		}
+		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now}, color)
+		return nil
+	}
 
 	store := cache.New(gitDir)
 	agg, lastHash, ok := store.Load()
@@ -250,6 +267,8 @@ func subcommandView(name string) (string, bool) {
 		return "churn", true
 	case "contributors":
 		return "contributors", true
+	case "branches":
+		return "branches", true
 	default:
 		return "", false
 	}
