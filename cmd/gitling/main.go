@@ -39,14 +39,19 @@ func buildVersion() string {
 func main() {
 	view := "dashboard"
 	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "graph" {
-		view = "graph"
-		args = args[1:]
+	// A drill-down may be named as the first positional (e.g. `gitling graph`).
+	// Strip it before flag parsing so flags can follow the subcommand.
+	if len(args) > 0 {
+		if v, ok := subcommandView(args[0]); ok {
+			view = v
+			args = args[1:]
+		}
 	}
 
 	noColor := flag.Bool("no-color", false, "disable ANSI color output")
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
+	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -63,9 +68,13 @@ func main() {
 	if *graph {
 		view = "graph"
 	}
+	if *branches {
+		view = "branches"
+	}
+	// A subcommand may also appear after flags (e.g. `gitling --since 1y branches`).
 	if flag.NArg() > 0 {
-		if flag.NArg() == 1 && flag.Arg(0) == "graph" {
-			view = "graph"
+		if v, ok := subcommandView(flag.Arg(0)); ok && flag.NArg() == 1 {
+			view = v
 		} else {
 			fmt.Fprintf(os.Stderr, "gitling: unexpected argument %q\n", flag.Arg(0))
 			os.Exit(2)
@@ -88,10 +97,12 @@ func usage() {
 Usage:
   gitling [flags]
   gitling graph [flags]
+  gitling branches [flags]
 
 Flags:
   --since <dur>   time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
   --graph         show the full activity graph drill-down
+  --branches      show the branch overview drill-down
   --bucket <b>    activity graph bucket: day, week, month (default day)
   --json          emit machine-readable JSON instead of the human dashboard
   --no-color      plain output with no ANSI escape codes
@@ -119,6 +130,17 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 	}
 	now := time.Now()
 	sinceTime := now.AddDate(0, 0, -days)
+
+	// The branches view is live git state, independent of the commit-history
+	// aggregate, so serve it before the (potentially expensive) history walk.
+	if !jsonOutput && view == "branches" {
+		branches, err := repo.Branches()
+		if err != nil {
+			return err
+		}
+		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now}, color)
+		return nil
+	}
 
 	store := cache.New(gitDir)
 	agg, lastHash, ok := store.Load()
@@ -184,6 +206,18 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 
 	render.Dashboard(stdout, m, color)
 	return nil
+}
+
+// subcommandView maps a drill-down subcommand name to its view identifier.
+func subcommandView(name string) (string, bool) {
+	switch name {
+	case "graph":
+		return "graph", true
+	case "branches":
+		return "branches", true
+	default:
+		return "", false
+	}
 }
 
 func validateBucket(bucket string) error {

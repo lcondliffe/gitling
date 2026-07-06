@@ -40,6 +40,21 @@ func TestRangeLabel(t *testing.T) {
 	}
 }
 
+func TestSubcommandView(t *testing.T) {
+	views := map[string]string{"graph": "graph", "branches": "branches"}
+	for name, want := range views {
+		got, ok := subcommandView(name)
+		if !ok || got != want {
+			t.Errorf("subcommandView(%q) = (%q, %v), want (%q, true)", name, got, ok, want)
+		}
+	}
+	for _, name := range []string{"dashboard", "churn", "", "BRANCHES"} {
+		if got, ok := subcommandView(name); ok {
+			t.Errorf("subcommandView(%q) = (%q, true), want (_, false)", name, got)
+		}
+	}
+}
+
 func TestValidateBucket(t *testing.T) {
 	for _, in := range []string{"day", "week", "month"} {
 		if err := validateBucket(in); err != nil {
