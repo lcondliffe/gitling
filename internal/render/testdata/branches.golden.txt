@@ -1,0 +1,8 @@
+
+BRANCHES  ·  4 branches
+
+  * main                        ↑0 ↓0   2h ago    Ada Lovelace
+    feature/heatmap             ↑5 ↓1   3d ago    Alan Turing   vs main
+    stale/old-experiment        gone    1mo ago   Grace Hopper
+    chore/no-upstream-in-sync   —       5m ago    Margaret Hamilton
+
