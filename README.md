@@ -73,14 +73,15 @@ Color is also auto-disabled when stdout isn't a terminal or `NO_COLOR` is set.
   changing `--since` never invalidates the cache.
 - **cache** persists the rollup as a gob file under `.git/gitling-cache/`,
   keyed by the last HEAD seen. Each run only walks commits newer than the last,
-  making repeat runs effectively instant.
+  making repeat runs effectively instant. An opt-in sqlite-backed cache is also
+  available for very large repos — see below.
 - **render** draws everything with 256-color ANSI chosen to read on both light
   and dark backgrounds, or emits the same model as indented JSON when `--json`
   is set.
 
 The layers are cleanly separated: the git backend (currently shell-out, a
-go-git backend could replace it) and the cache (gob, could become sqlite) are
-each swappable without touching the others.
+go-git backend could replace it) and the cache (gob by default, swappable for
+sqlite — see below) are each swappable without touching the others.
 
 ## Build
 
@@ -89,6 +90,29 @@ go build ./cmd/gitling
 ```
 
 Pure Go standard library — no external dependencies.
+
+### Optional sqlite cache backend
+
+The default cache backend is the zero-dependency gob file described above.
+For very large repos (or to enable future partial/range queries against the
+cache) an alternative sqlite-backed store is available behind a build tag:
+
+```
+go build -tags sqlite ./cmd/gitling
+```
+
+This uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite), a
+pure-Go, cgo-free `database/sql` driver, so the tagged build still
+cross-compiles without a C toolchain (important for the release workflow).
+The dependency is listed in `go.mod`/`go.sum` but is only compiled in when
+building with `-tags sqlite`; the default build remains dependency-free.
+
+The sqlite store writes to `.git/gitling-cache/aggregates.db` using a
+normalized schema: one row per calendar day (`days`, mirroring the in-memory
+per-day buckets) plus a `meta` table for the schema version and last-seen
+HEAD hash. It implements the same `cache.Backend` interface as the gob store,
+so `gitling` behaves identically either way — only the on-disk format
+changes.
 
 ## Releases
 
