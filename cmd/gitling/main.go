@@ -100,7 +100,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, *jsonOutput); err != nil {
+	width, ok := render.TerminalWidth(os.Stdout)
+	if !ok {
+		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
+	}
+
+	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, *jsonOutput, width); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -131,7 +136,7 @@ Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool, width int) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -157,7 +162,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		if err != nil {
 			return err
 		}
-		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now}, color)
+		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: width}, color)
 		return nil
 	}
 
@@ -198,6 +203,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		Vitals:     vitals,
 		RangeLabel: rangeLabel(since),
 		Now:        now,
+		Width:      width,
 	}
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
@@ -212,6 +218,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			TotalCommits: m.TotalCommits,
 			Streak:       m.Streak,
 			Now:          now,
+			Width:        width,
 		}, color)
 		return nil
 	}
@@ -220,6 +227,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			RangeLabel: m.RangeLabel,
 			Files:      agg.HotFiles(sinceTime, now, 0), // 0 == all files
 			Now:        now,
+			Width:      width,
 		}, color)
 		return nil
 	}
@@ -228,6 +236,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			RangeLabel:   m.RangeLabel,
 			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors
 			Now:          now,
+			Width:        width,
 		}, color)
 		return nil
 	}
