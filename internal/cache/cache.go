@@ -17,30 +17,42 @@ import (
 )
 
 const (
-	dirName  = "gitling-cache"
-	fileName = "aggregates.gob"
-	version  = 2 // bump to invalidate on incompatible schema changes
+	dirName = "gitling-cache"
+	version = 3 // bump to invalidate on incompatible schema changes
 )
 
-// Store reads and writes the aggregate cache for one repository.
+// Store reads and writes the aggregate cache for one repository and date
+// basis.
+//
+// The cache stores commits already bucketed by day (see aggregate.Merge), so
+// an author-bucketed payload and a commit-bucketed payload are not
+// interchangeable: reusing one for the other basis would silently produce
+// wrong day totals. To keep them from mixing, each basis gets its own cache
+// file (aggregates-author.gob / aggregates-commit.gob), so switching --date
+// simply misses the other basis's file and rebuilds instead of reading stale
+// data. The basis is also stamped into the payload and re-checked on Load as
+// a second line of defense (e.g. against a hand-edited or copied cache file).
 type Store struct {
-	path string
+	path  string
+	basis aggregate.DateBasis
 }
 
 type payload struct {
 	Version  int
 	LastHash string // HEAD when this cache was written
+	Basis    aggregate.DateBasis
 	Agg      aggregate.Aggregates
 }
 
-// New returns a Store rooted at the given git directory.
-func New(gitDir string) *Store {
-	return &Store{path: filepath.Join(gitDir, dirName, fileName)}
+// New returns a Store rooted at the given git directory, scoped to basis.
+func New(gitDir string, basis aggregate.DateBasis) *Store {
+	fileName := "aggregates-" + string(basis) + ".gob"
+	return &Store{path: filepath.Join(gitDir, dirName, fileName), basis: basis}
 }
 
 // Load returns the cached aggregates and the HEAD hash they were built from. ok
-// is false on any miss (absent, unreadable, or version mismatch); callers should
-// then rebuild from full history.
+// is false on any miss (absent, unreadable, version mismatch, or a basis that
+// doesn't match this Store's); callers should then rebuild from full history.
 func (s *Store) Load() (agg *aggregate.Aggregates, lastHash string, ok bool) {
 	f, err := os.Open(s.path)
 	if err != nil {
@@ -49,7 +61,7 @@ func (s *Store) Load() (agg *aggregate.Aggregates, lastHash string, ok bool) {
 	defer f.Close()
 
 	var p payload
-	if err := gob.NewDecoder(f).Decode(&p); err != nil || p.Version != version {
+	if err := gob.NewDecoder(f).Decode(&p); err != nil || p.Version != version || p.Basis != s.basis {
 		return nil, "", false
 	}
 	return &p.Agg, p.LastHash, true
@@ -66,7 +78,7 @@ func (s *Store) Save(agg *aggregate.Aggregates, lastHash string) error {
 	if err != nil {
 		return err
 	}
-	if err := gob.NewEncoder(f).Encode(payload{Version: version, LastHash: lastHash, Agg: *agg}); err != nil {
+	if err := gob.NewEncoder(f).Encode(payload{Version: version, LastHash: lastHash, Basis: s.basis, Agg: *agg}); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return err

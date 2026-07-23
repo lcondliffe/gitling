@@ -57,6 +57,7 @@ func main() {
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
+	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = usage
@@ -99,8 +100,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	if err := validateDateBasis(*dateBasis); err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		os.Exit(2)
+	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, *jsonOutput); err != nil {
+	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, aggregate.DateBasis(*dateBasis), *jsonOutput); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -123,6 +128,7 @@ Flags:
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
   --bucket <b>     activity graph bucket: day, week, month (default day)
+  --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
   --no-color       plain output with no ANSI escape codes
   --version        print version and exit
@@ -131,7 +137,7 @@ Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, dateBasis aggregate.DateBasis, jsonOutput bool) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -161,7 +167,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		return nil
 	}
 
-	store := cache.New(gitDir)
+	store := cache.New(gitDir, dateBasis)
 	agg, lastHash, ok := store.Load()
 	if !ok {
 		agg = aggregate.New()
@@ -186,7 +192,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			if err != nil {
 				return err
 			}
-			agg.Merge(commits)
+			agg.Merge(commits, dateBasis)
 			if err := store.Save(agg, head); err != nil {
 				// Cache is an optimization, not correctness; warn and continue.
 				fmt.Fprintln(os.Stderr, "gitling: warning: cache write failed:", err)
@@ -281,6 +287,13 @@ func validateBucket(bucket string) error {
 	default:
 		return fmt.Errorf("invalid --bucket %q (use day, week, or month)", bucket)
 	}
+}
+
+func validateDateBasis(basis string) error {
+	if !aggregate.DateBasis(basis).Valid() {
+		return fmt.Errorf("invalid --date %q (use author or commit)", basis)
+	}
+	return nil
 }
 
 // colorEnabled honors --no-color and the NO_COLOR convention, and auto-disables

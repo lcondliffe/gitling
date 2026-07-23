@@ -93,3 +93,14 @@ func TestValidateBucket(t *testing.T) {
 		t.Fatal("validateBucket(quarter) = nil error, want error")
 	}
 }
+
+func TestValidateDateBasis(t *testing.T) {
+	for _, in := range []string{"author", "commit"} {
+		if err := validateDateBasis(in); err != nil {
+			t.Errorf("validateDateBasis(%q) error: %v", in, err)
+		}
+	}
+	if err := validateDateBasis("committed"); err == nil {
+		t.Fatal("validateDateBasis(committed) = nil error, want error")
+	}
+}
