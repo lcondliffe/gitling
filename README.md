@@ -78,9 +78,9 @@ Color is also auto-disabled when stdout isn't a terminal or `NO_COLOR` is set.
   and dark backgrounds, or emits the same model as indented JSON when `--json`
   is set.
 
-The layers are cleanly separated: the git backend (currently shell-out, a
-go-git backend could replace it) and the cache (gob, could become sqlite) are
-each swappable without touching the others.
+The layers are cleanly separated: the git backend (shell-out by default, with
+an opt-in pure-Go go-git backend — see below) and the cache (gob, could
+become sqlite) are each swappable without touching the others.
 
 ## Build
 
@@ -89,6 +89,31 @@ go build ./cmd/gitling
 ```
 
 Pure Go standard library — no external dependencies.
+
+### Optional go-git backend
+
+The git interaction layer (`internal/gitdata`) sits behind a small `Backend`
+interface. By default it's implemented by shelling out to the `git` binary,
+which keeps the default build dependency-free. An alternative pure-Go
+implementation using [go-git](https://github.com/go-git/go-git) is available
+behind the `gogit` build tag:
+
+```
+go build -tags gogit ./cmd/gitling
+```
+
+This trades the dependency-free default for not needing `git` on `PATH`.
+It's opt-in and not the default because, on this project's benchmarks,
+shell-out is still faster for the commit-log walk that dominates gitling's
+runtime; see `internal/gitdata/bench_test.go` /
+`internal/gitdata/bench_gogit_test.go`. A `GITLING_BACKEND=shell` environment
+variable can force shell-out even in a `gogit`-tagged binary; it has no
+effect on the default build.
+
+Known divergences from shell-out are documented on `gogitRepo` in
+`internal/gitdata/gogit.go` (notably: author identity is not
+mailmap-resolved, and stash count is always reported as 0 since go-git has
+no porcelain equivalent of `git stash list`).
 
 ## Releases
 
