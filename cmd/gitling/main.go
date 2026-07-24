@@ -58,6 +58,7 @@ func main() {
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
+	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
@@ -127,6 +128,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	if err := validateDateBasis(*dateBasis); err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		os.Exit(2)
+	}
 	// --no-color always wins over --color (explicit or from config): it is
 	// the back-compat escape hatch and takes precedence when both are given.
 	if *noColor {
@@ -142,7 +147,7 @@ func main() {
 		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, *jsonOutput, width); err != nil {
+	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, aggregate.DateBasis(*dateBasis), *jsonOutput, width); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -165,6 +170,7 @@ Flags:
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
   --bucket <b>     activity graph bucket: day, week, month (default day)
+  --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
   --color <mode>   when to use color: always, never, auto (default auto)
   --no-color       plain output with no ANSI escape codes (alias for --color=never)
@@ -179,7 +185,7 @@ Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool, width int) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, dateBasis aggregate.DateBasis, jsonOutput bool, width int) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -209,7 +215,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		return nil
 	}
 
-	store := cache.New(gitDir)
+	store := cache.New(gitDir, dateBasis)
 	agg, lastHash, ok := store.Load()
 	if !ok {
 		agg = aggregate.New()
@@ -234,7 +240,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			if err != nil {
 				return err
 			}
-			agg.Merge(commits)
+			agg.Merge(commits, dateBasis)
 			if err := store.Save(agg, head); err != nil {
 				// Cache is an optimization, not correctness; warn and continue.
 				fmt.Fprintln(os.Stderr, "gitling: warning: cache write failed:", err)
@@ -333,6 +339,13 @@ func validateBucket(bucket string) error {
 	default:
 		return fmt.Errorf("invalid --bucket %q (use day, week, or month)", bucket)
 	}
+}
+
+func validateDateBasis(basis string) error {
+	if !aggregate.DateBasis(basis).Valid() {
+		return fmt.Errorf("invalid --date %q (use author or commit)", basis)
+	}
+	return nil
 }
 
 // validateColor checks that mode is one of the supported --color values.

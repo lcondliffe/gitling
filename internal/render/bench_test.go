@@ -96,7 +96,7 @@ func genSyntheticCommits(n int) []gitdata.Commit {
 // panel's data for a Dashboard render.
 func buildPipelineModel(commits []gitdata.Commit, now time.Time) Model {
 	agg := aggregate.New()
-	agg.Merge(commits)
+	agg.Merge(commits, aggregate.AuthorDate)
 
 	since := now.AddDate(0, 0, -13*7) // 13 weeks, matching a typical dashboard range
 	days := agg.DailyCounts(since, now)
@@ -136,7 +136,7 @@ func BenchmarkAggregateMerge50kCommits(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		agg := aggregate.New()
-		agg.Merge(commits)
+		agg.Merge(commits, aggregate.AuthorDate)
 	}
 }
 
