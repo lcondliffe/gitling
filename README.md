@@ -60,6 +60,7 @@ gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
+gitling --date commit    # bucket by commit date instead of author date
 gitling --color=always   # force color even when stdout isn't a terminal
 gitling --config ~/gitling.json  # use an explicit config file
 ```
@@ -99,14 +100,17 @@ config-driven; that's left as future work.
 ## How it works
 
 - **gitdata** shells out to `git log --numstat` and a handful of cheap
-  plumbing commands. Author date is used for bucketing.
+  plumbing commands. Each commit carries both its author date and commit date.
 - **aggregate** rolls commits up into per-day buckets (counts, line deltas,
-  per-author and per-file tallies). Range queries sum the days in range, so
+  per-author and per-file tallies), keyed by either the author date (default)
+  or the commit date, per `--date`. Range queries sum the days in range, so
   changing `--since` never invalidates the cache.
 - **cache** persists the rollup as a gob file under `.git/gitling-cache/`,
-  keyed by the last HEAD seen. Each run only walks commits newer than the last,
-  making repeat runs effectively instant. An opt-in sqlite-backed cache is also
-  available for very large repos — see below.
+  keyed by the last HEAD seen. Author-date and commit-date runs use separate
+  cache files, so switching `--date` never serves a stale, wrongly-bucketed
+  rollup. Each run only walks commits newer than the last, making repeat runs
+  effectively instant. An opt-in sqlite-backed cache is also available for
+  very large repos — see below.
 - **render** draws everything with 256-color ANSI chosen to read on both light
   and dark backgrounds, or emits the same model as indented JSON when `--json`
   is set.

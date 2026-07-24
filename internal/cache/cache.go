@@ -16,16 +16,24 @@ import (
 
 const (
 	dirName = "gitling-cache"
-	version = 2 // bump to invalidate on incompatible schema changes
+	version = 3 // bump to invalidate on incompatible schema changes
 )
 
-// Backend reads and writes the aggregate cache for one repository. The gob
-// store (default) and the sqlite store (opt-in, `-tags sqlite`) both satisfy
-// this interface.
+// Backend reads and writes the aggregate cache for one repository and date
+// basis.
+//
+// The cache stores commits already bucketed by day (see aggregate.Merge), so
+// an author-bucketed payload and a commit-bucketed payload are not
+// interchangeable: reusing one for the other basis would silently produce
+// wrong day totals. Both the gob store (default) and the sqlite store
+// (opt-in, `-tags sqlite`) guard against this by scoping storage to the
+// requested basis (e.g. a per-basis file) and by stamping the basis into the
+// payload as a second line of defense; see store_gob.go / store_sqlite.go.
 type Backend interface {
 	// Load returns the cached aggregates and the HEAD hash they were built
-	// from. ok is false on any miss (absent, unreadable, or version
-	// mismatch); callers should then rebuild from full history.
+	// from. ok is false on any miss (absent, unreadable, version mismatch,
+	// or a basis that doesn't match what was requested); callers should then
+	// rebuild from full history.
 	Load() (agg *aggregate.Aggregates, lastHash string, ok bool)
 
 	// Save writes aggregates and the HEAD hash, atomically where possible, so

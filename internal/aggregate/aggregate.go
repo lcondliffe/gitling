@@ -18,6 +18,27 @@ import (
 
 const dayFmt = "2006-01-02" // lexical order == chronological order
 
+// DateBasis selects which commit timestamp buckets are keyed on: the author
+// date (when the change was originally authored) or the commit date (when it
+// was recorded into the repo, e.g. after a rebase). They can diverge, so the
+// choice affects the heatmap, contributors, and growth panels.
+type DateBasis string
+
+const (
+	AuthorDate DateBasis = "author"
+	CommitDate DateBasis = "commit"
+)
+
+// Valid reports whether b is a recognized DateBasis.
+func (b DateBasis) Valid() bool {
+	switch b {
+	case AuthorDate, CommitDate:
+		return true
+	default:
+		return false
+	}
+}
+
 // DayBucket holds everything derived for a single calendar day.
 type DayBucket struct {
 	Commits    int
@@ -29,9 +50,16 @@ type DayBucket struct {
 
 // Aggregates is the full-history, range-independent rollup. It is the value the
 // cache serializes.
+//
+// Basis records which timestamp (author or commit date) the Days map was
+// bucketed on. It is set by the first Merge call and is exported so the cache
+// can persist it: a cached payload whose Basis doesn't match the basis the
+// caller asked for must never be reused (see internal/cache), otherwise a run
+// with --date=commit could silently serve author-bucketed data or vice versa.
 type Aggregates struct {
 	Days        map[string]DayBucket // key: "2006-01-02"
 	AuthorNames map[string]string    // email -> display name
+	Basis       DateBasis            // date basis Days was bucketed on; empty until first Merge
 }
 
 // New returns an empty Aggregates ready to Merge into.
@@ -42,18 +70,32 @@ func New() *Aggregates {
 	}
 }
 
-// Merge folds commits into the rollup. It is additive, so callers can pass only
-// the commits newer than the last cached hash. Commits are expected newest-first
-// (git log order); author name is recorded from the newest commit seen per email.
-func (a *Aggregates) Merge(commits []gitdata.Commit) {
+// Merge folds commits into the rollup, bucketing each by the given date basis.
+// It is additive, so callers can pass only the commits newer than the last
+// cached hash. Commits are expected newest-first (git log order); author name
+// is recorded from the newest commit seen per email.
+//
+// All commits ever merged into a given Aggregates must use the same basis: an
+// empty Aggregates adopts the basis of its first Merge call, and mixing bases
+// within one Aggregates would silently corrupt the day keys. Callers that
+// switch basis (e.g. the --date flag) must start from a fresh Aggregates, not
+// reuse one built with the other basis.
+func (a *Aggregates) Merge(commits []gitdata.Commit, basis DateBasis) {
 	if a.Days == nil {
 		a.Days = map[string]DayBucket{}
 	}
 	if a.AuthorNames == nil {
 		a.AuthorNames = map[string]string{}
 	}
+	if a.Basis == "" {
+		a.Basis = basis
+	}
 	for _, c := range commits {
-		day := c.AuthorTime.Local().Format(dayFmt)
+		t := c.AuthorTime
+		if basis == CommitDate {
+			t = c.CommitTime
+		}
+		day := t.Local().Format(dayFmt)
 		b := a.Days[day]
 		if b.Authors == nil {
 			b.Authors = map[string]int{}

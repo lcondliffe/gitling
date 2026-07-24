@@ -13,7 +13,7 @@ func day(y int, m time.Month, d int) time.Time {
 
 func commit(name, email string, t time.Time, ins, del int, files ...string) gitdata.Commit {
 	return gitdata.Commit{
-		AuthorName: name, AuthorEmail: email, AuthorTime: t,
+		AuthorName: name, AuthorEmail: email, AuthorTime: t, CommitTime: t,
 		Insertions: ins, Deletions: del, Files: files,
 	}
 }
@@ -23,7 +23,7 @@ func TestDailyCountsAndTotal(t *testing.T) {
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 6, 2), 1, 0, "f.go"),
 		commit("A", "a@x", day(2024, 6, 2), 1, 0, "g.go"),
-	})
+	}, AuthorDate)
 	days := a.DailyCounts(day(2024, 6, 1), day(2024, 6, 3))
 	if len(days) != 3 {
 		t.Fatalf("got %d days, want 3", len(days))
@@ -107,7 +107,7 @@ func TestTopContributorsCoalescesByName(t *testing.T) {
 		commit("Luke", "luke@personal", day(2024, 6, 2), 1, 0),
 		commit("Luke", "luke@work", day(2024, 6, 3), 1, 0), // same name, 2nd email
 		commit("Bob", "bob@x", day(2024, 6, 3), 1, 0),
-	})
+	}, AuthorDate)
 	got := a.TopContributors(day(2024, 6, 1), day(2024, 6, 30), 5)
 	if len(got) != 2 {
 		t.Fatalf("got %d contributors, want 2 (Luke merged): %+v", len(got), got)
@@ -125,7 +125,7 @@ func TestTopContributorsRangeFilter(t *testing.T) {
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 1, 1), 1, 0), // out of range
 		commit("A", "a@x", day(2024, 6, 2), 1, 0), // in range
-	})
+	}, AuthorDate)
 	got := a.TopContributors(day(2024, 6, 1), day(2024, 6, 30), 5)
 	if len(got) != 1 || got[0].Commits != 1 {
 		t.Errorf("range filter failed: %+v", got)
@@ -137,7 +137,7 @@ func TestHotFiles(t *testing.T) {
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 6, 2), 1, 0, "hot.go", "cold.go"),
 		commit("A", "a@x", day(2024, 6, 3), 1, 0, "hot.go"),
-	})
+	}, AuthorDate)
 	got := a.HotFiles(day(2024, 6, 1), day(2024, 6, 30), 3)
 	if len(got) != 2 || got[0].Path != "hot.go" || got[0].Commits != 2 {
 		t.Fatalf("HotFiles = %+v, want hot.go(2) first", got)
@@ -149,7 +149,7 @@ func TestHotFilesDedupWithinCommit(t *testing.T) {
 	// A file listed twice in one commit must count once for that commit.
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 6, 2), 1, 0, "dup.go", "dup.go"),
-	})
+	}, AuthorDate)
 	got := a.HotFiles(day(2024, 6, 1), day(2024, 6, 30), 3)
 	if len(got) != 1 || got[0].Commits != 1 {
 		t.Errorf("HotFiles dedup = %+v, want dup.go(1)", got)
@@ -161,7 +161,7 @@ func TestBuildGrowth(t *testing.T) {
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2023, 12, 1), 100, 0), // before 6mo baseline
 		commit("A", "a@x", day(2024, 6, 1), 60, 10),  // within last 6mo: net +50
-	})
+	}, AuthorDate)
 	until := day(2024, 7, 1) // baseline = 2024-01-01
 	g := a.BuildGrowth(until)
 
@@ -186,7 +186,7 @@ func TestBuildGrowthNoBaseline(t *testing.T) {
 	a := New()
 	a.Merge([]gitdata.Commit{
 		commit("A", "a@x", day(2024, 6, 1), 100, 0), // only recent data
-	})
+	}, AuthorDate)
 	g := a.BuildGrowth(day(2024, 7, 1))
 	if g.HasPct {
 		t.Errorf("HasPct = true, want false (no pre-6mo baseline)")
@@ -196,10 +196,44 @@ func TestBuildGrowthNoBaseline(t *testing.T) {
 	}
 }
 
+func TestMergeBucketsByRequestedBasis(t *testing.T) {
+	// A commit authored on 2024-06-02 but recorded (e.g. via rebase) on
+	// 2024-06-05: the two bases must land it in different day buckets.
+	c := gitdata.Commit{
+		AuthorName: "A", AuthorEmail: "a@x",
+		AuthorTime: day(2024, 6, 2), CommitTime: day(2024, 6, 5),
+		Insertions: 1,
+	}
+
+	byAuthor := New()
+	byAuthor.Merge([]gitdata.Commit{c}, AuthorDate)
+	if got := byAuthor.DailyCounts(day(2024, 6, 2), day(2024, 6, 2))[0].Count; got != 1 {
+		t.Errorf("author basis: 2024-06-02 count = %d, want 1", got)
+	}
+	if got := byAuthor.DailyCounts(day(2024, 6, 5), day(2024, 6, 5))[0].Count; got != 0 {
+		t.Errorf("author basis: 2024-06-05 count = %d, want 0", got)
+	}
+	if byAuthor.Basis != AuthorDate {
+		t.Errorf("byAuthor.Basis = %q, want %q", byAuthor.Basis, AuthorDate)
+	}
+
+	byCommit := New()
+	byCommit.Merge([]gitdata.Commit{c}, CommitDate)
+	if got := byCommit.DailyCounts(day(2024, 6, 2), day(2024, 6, 2))[0].Count; got != 0 {
+		t.Errorf("commit basis: 2024-06-02 count = %d, want 0", got)
+	}
+	if got := byCommit.DailyCounts(day(2024, 6, 5), day(2024, 6, 5))[0].Count; got != 1 {
+		t.Errorf("commit basis: 2024-06-05 count = %d, want 1", got)
+	}
+	if byCommit.Basis != CommitDate {
+		t.Errorf("byCommit.Basis = %q, want %q", byCommit.Basis, CommitDate)
+	}
+}
+
 func TestMergeIsAdditive(t *testing.T) {
 	a := New()
-	a.Merge([]gitdata.Commit{commit("A", "a@x", day(2024, 6, 2), 1, 0)})
-	a.Merge([]gitdata.Commit{commit("A", "a@x", day(2024, 6, 2), 1, 0)}) // incremental batch
+	a.Merge([]gitdata.Commit{commit("A", "a@x", day(2024, 6, 2), 1, 0)}, AuthorDate)
+	a.Merge([]gitdata.Commit{commit("A", "a@x", day(2024, 6, 2), 1, 0)}, AuthorDate) // incremental batch
 	days := a.DailyCounts(day(2024, 6, 2), day(2024, 6, 2))
 	if days[0].Count != 2 {
 		t.Errorf("after two merges count = %d, want 2", days[0].Count)
