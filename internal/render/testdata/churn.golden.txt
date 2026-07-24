@@ -1,0 +1,10 @@
+
+FILE CHURN  ·  last 1y
+
+  ██████████████████████   31   internal/render/render.go
+  █████████████            18   internal/aggregate/aggregate.go
+  █████████                12   cmd/gitling/main.go
+  █                         2   go.mod
+
+  4 files touched
+
