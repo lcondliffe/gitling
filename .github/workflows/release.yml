@@ -92,15 +92,25 @@ jobs:
           echo >> notes.md
           echo "**Full changelog**: https://github.com/${REPO}/commits/${TAG}" >> notes.md
 
-      - name: create release
+      - name: publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "gitling ${GITHUB_REF_NAME}" \
-            --notes-file notes.md \
-            dist/gitling_* dist/checksums.txt
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; refreshing notes and assets"
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "gitling ${GITHUB_REF_NAME}" \
+              --notes-file notes.md
+            gh release upload "${GITHUB_REF_NAME}" \
+              --clobber \
+              dist/gitling_* dist/checksums.txt
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "gitling ${GITHUB_REF_NAME}" \
+              --notes-file notes.md \
+              dist/gitling_* dist/checksums.txt
+          fi
 
       - name: update Homebrew tap formula
         env:
