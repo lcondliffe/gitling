@@ -1,0 +1,11 @@
+
+CONTRIBUTORS  ·  last 1y
+
+  Ada Lovelace       ██████████████████████   42
+  Alan Turing        ██████████████           27
+  Grace Hopper       ████████                 15
+  Margaret Hamilt…   █████                     9
+  Katherine Johns…   ██                        3
+
+  5 contributors · 96 commits
+

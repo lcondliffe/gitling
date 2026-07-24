@@ -50,7 +50,8 @@ func main() {
 		}
 	}
 
-	noColor := flag.Bool("no-color", false, "disable ANSI color output")
+	noColor := flag.Bool("no-color", false, "disable ANSI color output (alias for --color=never)")
+	color := flag.String("color", "auto", "when to use color: always, never, auto (default auto)")
 	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
@@ -59,6 +60,7 @@ func main() {
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
 	flag.Usage = usage
 	if err := flag.CommandLine.Parse(args); err != nil {
 		os.Exit(2)
@@ -67,6 +69,32 @@ func main() {
 	if *showVersion {
 		fmt.Println("gitling", buildVersion())
 		return
+	}
+
+	// Track which flags were explicitly passed on the command line, so config
+	// file values only fill in ones the user left at their default.
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	path, err := configPath(*configFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		os.Exit(2)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		os.Exit(2)
+	}
+
+	if !explicit["since"] && cfg.Since != "" {
+		*since = cfg.Since
+	}
+	if !explicit["bucket"] && cfg.Bucket != "" {
+		*bucket = cfg.Bucket
+	}
+	if !explicit["color"] && cfg.Color != "" {
+		*color = cfg.Color
 	}
 
 	if *graph {
@@ -99,8 +127,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	// --no-color always wins over --color (explicit or from config): it is
+	// the back-compat escape hatch and takes precedence when both are given.
+	if *noColor {
+		*color = "never"
+	}
+	if err := validateColor(*color); err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		os.Exit(2)
+	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*noColor), view, *bucket, *jsonOutput); err != nil {
+	width, ok := render.TerminalWidth(os.Stdout)
+	if !ok {
+		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
+	}
+
+	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, *jsonOutput, width); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -124,14 +166,20 @@ Flags:
   --branches       show the branch overview drill-down
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --json           emit machine-readable JSON instead of the human dashboard
-  --no-color       plain output with no ANSI escape codes
+  --color <mode>   when to use color: always, never, auto (default auto)
+  --no-color       plain output with no ANSI escape codes (alias for --color=never)
+  --config <path>  path to config file (default $XDG_CONFIG_HOME/gitling/config.json
+                    or ~/.config/gitling/config.json; $GITLING_CONFIG overrides)
   --version        print version and exit
+
+Config file (optional, JSON) may set defaults for "since", "color", and
+"bucket"; command-line flags always override it. --no-color overrides both.
 
 Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOutput bool, width int) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -157,7 +205,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		if err != nil {
 			return err
 		}
-		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now}, color)
+		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: width}, color)
 		return nil
 	}
 
@@ -198,6 +246,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 		Vitals:     vitals,
 		RangeLabel: rangeLabel(since),
 		Now:        now,
+		Width:      width,
 	}
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
@@ -212,6 +261,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			TotalCommits: m.TotalCommits,
 			Streak:       m.Streak,
 			Now:          now,
+			Width:        width,
 		}, color)
 		return nil
 	}
@@ -220,6 +270,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			RangeLabel: m.RangeLabel,
 			Files:      agg.HotFiles(sinceTime, now, 0), // 0 == all files
 			Now:        now,
+			Width:      width,
 		}, color)
 		return nil
 	}
@@ -228,6 +279,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, jsonOu
 			RangeLabel:   m.RangeLabel,
 			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors
 			Now:          now,
+			Width:        width,
 		}, color)
 		return nil
 	}
@@ -283,10 +335,29 @@ func validateBucket(bucket string) error {
 	}
 }
 
-// colorEnabled honors --no-color and the NO_COLOR convention, and auto-disables
-// color when stdout is not a terminal (piped or redirected).
-func colorEnabled(noColor bool) bool {
-	if noColor || os.Getenv("NO_COLOR") != "" {
+// validateColor checks that mode is one of the supported --color values.
+func validateColor(mode string) error {
+	switch mode {
+	case "always", "never", "auto":
+		return nil
+	default:
+		return fmt.Errorf("invalid --color %q (use always, never, or auto)", mode)
+	}
+}
+
+// colorEnabled implements --color's three modes. "always" forces color on
+// (useful when piping into a pager or a screenshot renderer, where stdout
+// isn't a TTY but ANSI is still wanted); "never" forces it off; "auto" (the
+// default) honors the NO_COLOR convention and auto-disables color when
+// stdout is not a terminal (piped or redirected).
+func colorEnabled(mode string) bool {
+	switch mode {
+	case "always":
+		return true
+	case "never":
+		return false
+	}
+	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
 	fi, err := os.Stdout.Stat()

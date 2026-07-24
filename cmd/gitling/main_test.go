@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseSinceDays(t *testing.T) {
 	ok := map[string]int{
@@ -91,5 +96,173 @@ func TestValidateBucket(t *testing.T) {
 	}
 	if err := validateBucket("quarter"); err == nil {
 		t.Fatal("validateBucket(quarter) = nil error, want error")
+	}
+}
+
+func TestValidateColor(t *testing.T) {
+	for _, in := range []string{"always", "never", "auto"} {
+		if err := validateColor(in); err != nil {
+			t.Errorf("validateColor(%q) error: %v", in, err)
+		}
+	}
+	for _, in := range []string{"", "sometimes", "ALWAYS"} {
+		if err := validateColor(in); err == nil {
+			t.Errorf("validateColor(%q) = nil error, want error", in)
+		}
+	}
+}
+
+func TestColorEnabled(t *testing.T) {
+	if !colorEnabled("always") {
+		t.Error(`colorEnabled("always") = false, want true`)
+	}
+	if colorEnabled("never") {
+		t.Error(`colorEnabled("never") = true, want false`)
+	}
+	// "auto" delegates to NO_COLOR / TTY detection; just confirm it doesn't
+	// panic and that NO_COLOR forces it off regardless of TTY state.
+	t.Setenv("NO_COLOR", "1")
+	if colorEnabled("auto") {
+		t.Error(`colorEnabled("auto") with NO_COLOR set = true, want false`)
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Missing file is not an error.
+	missing := filepath.Join(dir, "missing.json")
+	cfg, err := loadConfig(missing)
+	if err != nil {
+		t.Fatalf("loadConfig(missing) error: %v", err)
+	}
+	if cfg != (config{}) {
+		t.Errorf("loadConfig(missing) = %+v, want zero value", cfg)
+	}
+
+	// Valid config parses.
+	valid := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(valid, []byte(`{"since":"30d","color":"always","bucket":"week"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadConfig(valid)
+	if err != nil {
+		t.Fatalf("loadConfig(valid) error: %v", err)
+	}
+	want := config{Since: "30d", Color: "always", Bucket: "week"}
+	if cfg != want {
+		t.Errorf("loadConfig(valid) = %+v, want %+v", cfg, want)
+	}
+
+	// Unknown keys are ignored.
+	extra := filepath.Join(dir, "extra.json")
+	if err := os.WriteFile(extra, []byte(`{"since":"7d","panels":["graph"],"nonsense":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadConfig(extra)
+	if err != nil {
+		t.Fatalf("loadConfig(extra) error: %v", err)
+	}
+	if cfg.Since != "7d" {
+		t.Errorf("loadConfig(extra).Since = %q, want %q", cfg.Since, "7d")
+	}
+
+	// Malformed JSON is a clear error.
+	malformed := filepath.Join(dir, "malformed.json")
+	if err := os.WriteFile(malformed, []byte(`{not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(malformed); err == nil {
+		t.Error("loadConfig(malformed) = nil error, want error")
+	}
+}
+
+func TestConfigPath(t *testing.T) {
+	t.Run("explicit flag wins", func(t *testing.T) {
+		got, err := configPath("/explicit/path.json")
+		if err != nil || got != "/explicit/path.json" {
+			t.Errorf("configPath(flag) = (%q, %v), want (/explicit/path.json, nil)", got, err)
+		}
+	})
+
+	t.Run("GITLING_CONFIG env wins over XDG", func(t *testing.T) {
+		t.Setenv("GITLING_CONFIG", "/env/path.json")
+		t.Setenv("XDG_CONFIG_HOME", "/xdg")
+		got, err := configPath("")
+		if err != nil || got != "/env/path.json" {
+			t.Errorf("configPath(env) = (%q, %v), want (/env/path.json, nil)", got, err)
+		}
+	})
+
+	t.Run("XDG_CONFIG_HOME used when set", func(t *testing.T) {
+		t.Setenv("GITLING_CONFIG", "")
+		t.Setenv("XDG_CONFIG_HOME", "/xdg")
+		got, err := configPath("")
+		want := filepath.Join("/xdg", "gitling", "config.json")
+		if err != nil || got != want {
+			t.Errorf("configPath(xdg) = (%q, %v), want (%q, nil)", got, err, want)
+		}
+	})
+
+	t.Run("falls back to home dir", func(t *testing.T) {
+		t.Setenv("GITLING_CONFIG", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		home := t.TempDir()
+		t.Setenv("HOME", home)        // os.UserHomeDir reads HOME on Unix...
+		t.Setenv("USERPROFILE", home) // ...and USERPROFILE on Windows.
+		got, err := configPath("")
+		want := filepath.Join(home, ".config", "gitling", "config.json")
+		if err != nil || got != want {
+			t.Errorf("configPath(home) = (%q, %v), want (%q, nil)", got, err, want)
+		}
+	})
+}
+
+// TestFlagOverridesConfigPrecedence exercises the explicit-flag-vs-config
+// precedence logic the same way main() does: parse flags into a fresh
+// FlagSet, use Visit to see what the user actually passed, and confirm only
+// unset flags are filled in from config.
+func TestFlagOverridesConfigPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	since := fs.String("since", "", "")
+	color := fs.String("color", "auto", "")
+	bucket := fs.String("bucket", "day", "")
+	if err := fs.Parse([]string{"--since", "7d"}); err != nil {
+		t.Fatal(err)
+	}
+
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	if !explicit["since"] && cfg.Since != "" {
+		*since = cfg.Since
+	}
+	if !explicit["bucket"] && cfg.Bucket != "" {
+		*bucket = cfg.Bucket
+	}
+	if !explicit["color"] && cfg.Color != "" {
+		*color = cfg.Color
+	}
+
+	// --since was explicit: flag value wins over config.
+	if *since != "7d" {
+		t.Errorf("since = %q, want %q (flag should override config)", *since, "7d")
+	}
+	// --bucket and --color were not passed: config fills them in.
+	if *bucket != "month" {
+		t.Errorf("bucket = %q, want %q (config should fill unset flag)", *bucket, "month")
+	}
+	if *color != "never" {
+		t.Errorf("color = %q, want %q (config should fill unset flag)", *color, "never")
 	}
 }
