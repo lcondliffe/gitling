@@ -1,10 +1,16 @@
 // Package gitdata is the git interaction layer for gitling.
 //
-// v0.1 shells out to the `git` binary: for log aggregation and the cheap
-// working-tree queries this is both simpler and faster than a pure-Go walk,
-// and the prompt explicitly allows it. The package is deliberately small and
-// behind plain methods on Repo so a go-git backend could be slotted in later
-// without touching the aggregate/cache/render layers.
+// The default build shells out to the `git` binary: for log aggregation and
+// the cheap working-tree queries this is both simpler and faster than a pure-
+// Go walk. The git interaction surface is captured in the Backend interface;
+// Repo (this file's public type) is a thin dispatcher over whichever Backend
+// was selected, so the aggregate/cache/render layers never need to know which
+// one is in use.
+//
+// An optional pure-Go go-git backend is available behind the `gogit` build
+// tag (see gogit.go, backend_gogit.go); without that tag the default build
+// stays dependency-free and only the shell-out backend in this file
+// (shellRepo) is compiled in.
 package gitdata
 
 import (
@@ -69,22 +75,23 @@ type Branch struct {
 	LastAuthor string    // author name of the branch tip
 }
 
-// Repo is a handle to a git repository, identified by any path inside its
-// working tree.
-type Repo struct {
+// shellRepo is the default Backend implementation: a handle to a git
+// repository, identified by any path inside its working tree, that shells
+// out to the `git` binary for every operation.
+type shellRepo struct {
 	dir string
 }
 
-// Open verifies dir is inside a git work tree and returns a Repo.
-func Open(dir string) (*Repo, error) {
-	r := &Repo{dir: dir}
+// openShell verifies dir is inside a git work tree and returns a shellRepo.
+func openShell(dir string) (*shellRepo, error) {
+	r := &shellRepo{dir: dir}
 	if _, err := r.run("rev-parse", "--is-inside-work-tree"); err != nil {
 		return nil, fmt.Errorf("not a git repository (or no git on PATH): %w", err)
 	}
 	return r, nil
 }
 
-func (r *Repo) run(args ...string) (string, error) {
+func (r *shellRepo) run(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
 	var out, errb bytes.Buffer
@@ -98,7 +105,7 @@ func (r *Repo) run(args ...string) (string, error) {
 
 // GitDir returns the absolute path to the repository's git directory (handles
 // worktrees and submodules where .git may be a file).
-func (r *Repo) GitDir() (string, error) {
+func (r *shellRepo) GitDir() (string, error) {
 	out, err := r.run("rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return "", err
@@ -107,7 +114,7 @@ func (r *Repo) GitDir() (string, error) {
 }
 
 // Head returns the current HEAD commit hash. Returns an error on an empty repo.
-func (r *Repo) Head() (string, error) {
+func (r *shellRepo) Head() (string, error) {
 	out, err := r.run("rev-parse", "HEAD")
 	if err != nil {
 		return "", err
@@ -119,7 +126,7 @@ func (r *Repo) Head() (string, error) {
 // used to validate a cached commit against the current HEAD before doing an
 // incremental update; a false result (rewritten history, missing object) tells
 // the caller to rebuild from scratch.
-func (r *Repo) IsAncestor(maybeAncestor, descendant string) bool {
+func (r *shellRepo) IsAncestor(maybeAncestor, descendant string) bool {
 	if maybeAncestor == "" {
 		return false
 	}
@@ -128,7 +135,7 @@ func (r *Repo) IsAncestor(maybeAncestor, descendant string) bool {
 }
 
 // Vitals gathers the current branch / tracking / working-tree state.
-func (r *Repo) Vitals() (Vitals, error) {
+func (r *shellRepo) Vitals() (Vitals, error) {
 	var v Vitals
 
 	if out, err := r.run("symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
@@ -168,7 +175,7 @@ func (r *Repo) Vitals() (Vitals, error) {
 // its upstream tracking state, last-commit date, and last author. Branches with
 // no upstream are compared against the repository's default branch instead, so
 // feature branches still show a meaningful ahead/behind.
-func (r *Repo) Branches() ([]Branch, error) {
+func (r *shellRepo) Branches() ([]Branch, error) {
 	// One for-each-ref pass covers name, upstream, ahead/behind vs upstream,
 	// tip date, and tip author. Fields are separated by unitSep (never present
 	// in refnames or author names), records by newline.
@@ -207,7 +214,7 @@ func (r *Repo) Branches() ([]Branch, error) {
 
 // defaultBranch resolves the repository's default branch for ahead/behind
 // fallback: the remote's HEAD when known, otherwise a local main/master.
-func (r *Repo) defaultBranch() string {
+func (r *shellRepo) defaultBranch() string {
 	if out, err := r.run("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if s := strings.TrimSpace(out); s != "" {
 			return s
@@ -278,7 +285,7 @@ func parseTrack(s string) (ahead, behind int) {
 // Commits returns non-merge commits in revRange (e.g. "abc123..HEAD"), or the
 // entire history when revRange is empty. Results carry numstat-derived file
 // lists and insertion/deletion totals.
-func (r *Repo) Commits(revRange string) ([]Commit, error) {
+func (r *shellRepo) Commits(revRange string) ([]Commit, error) {
 	// %aN/%aE are mailmap-resolved, so a .mailmap collapses split identities.
 	format := "%x1e%H%x1f%aN%x1f%aE%x1f%at%x1f%ct"
 	args := []string{"log", "--no-merges", "--numstat", "--pretty=format:" + format}

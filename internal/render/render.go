@@ -18,6 +18,11 @@ import (
 )
 
 // Model is everything the dashboard needs to draw; the cmd layer assembles it.
+//
+// Width is the detected terminal column count; 0 means unknown/unbounded, in
+// which case rendering keeps its original fixed-width behavior (no
+// truncation or elision) so piped output stays stable. Width never affects
+// JSON output.
 type Model struct {
 	Vitals       gitdata.Vitals
 	RangeLabel   string // e.g. "last 14 weeks"
@@ -28,9 +33,10 @@ type Model struct {
 	Growth       aggregate.Growth
 	HotFiles     []aggregate.FileChurn
 	Now          time.Time
+	Width        int
 }
 
-// GraphModel is the focused activity drill-down view.
+// GraphModel is the focused activity drill-down view. Width: see Model.
 type GraphModel struct {
 	RangeLabel   string
 	Bucket       string
@@ -39,26 +45,30 @@ type GraphModel struct {
 	TotalCommits int
 	Streak       int
 	Now          time.Time
+	Width        int
 }
 
-// ChurnModel is the focused file-churn drill-down view.
+// ChurnModel is the focused file-churn drill-down view. Width: see Model.
 type ChurnModel struct {
 	RangeLabel string
 	Files      []aggregate.FileChurn
 	Now        time.Time
+	Width      int
 }
 
-// ContributorsModel is the focused contributor drill-down view.
+// ContributorsModel is the focused contributor drill-down view. Width: see Model.
 type ContributorsModel struct {
 	RangeLabel   string
 	Contributors []aggregate.Contributor
 	Now          time.Time
+	Width        int
 }
 
-// BranchesModel is the focused branch-overview drill-down view.
+// BranchesModel is the focused branch-overview drill-down view. Width: see Model.
 type BranchesModel struct {
 	Branches []gitdata.Branch
 	Now      time.Time
+	Width    int
 }
 
 // SGR color codes. cText ("") means the terminal's default foreground, which is
@@ -79,7 +89,8 @@ var (
 	cellFilled  = "■"
 	cellToday   = "□" // hollow square marks today (the "distinct border")
 	barFill     = "█"
-	contribBarW = 22
+	contribBarW = 22 // default/max bar width when the terminal width is unknown or generous
+	minBarW     = 6  // never shrink bars below this; a thinner bar stops reading as a bar
 )
 
 type palette struct{ on bool }
@@ -108,12 +119,12 @@ func Dashboard(w io.Writer, m Model, color bool) {
 	fmt.Fprintln(w)
 	p.header(w, "Top contributors", "")
 	fmt.Fprintln(w)
-	p.contributors(w, m.Contributors)
+	p.contributors(w, m.Contributors, m.Width)
 
 	fmt.Fprintln(w)
 	p.header(w, "Codebase growth", "6mo")
 	fmt.Fprintln(w)
-	p.growth(w, m.Growth, m.HotFiles)
+	p.growth(w, m.Growth, m.HotFiles, m.Width)
 	fmt.Fprintln(w)
 }
 
@@ -125,7 +136,7 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 	fmt.Fprintln(w)
 	p.header(w, "Activity graph", m.RangeLabel+" · "+m.Bucket)
 	fmt.Fprintln(w)
-	p.heatmap(w, Model{Days: m.Days, TotalCommits: m.TotalCommits, Streak: m.Streak, Now: m.Now})
+	p.heatmap(w, Model{Days: m.Days, TotalCommits: m.TotalCommits, Streak: m.Streak, Now: m.Now, Width: m.Width})
 
 	if chart := p.activityChart(m.Buckets, activityChartHeight); len(chart) > 0 {
 		fmt.Fprintln(w)
@@ -164,7 +175,7 @@ func Contributors(w io.Writer, m ContributorsModel, color bool) {
 	fmt.Fprintln(w)
 	p.header(w, "Contributors", m.RangeLabel)
 	fmt.Fprintln(w)
-	p.contributors(w, m.Contributors)
+	p.contributors(w, m.Contributors, m.Width)
 
 	if len(m.Contributors) > 0 {
 		total := 0
@@ -201,23 +212,26 @@ func Churn(w io.Writer, m ChurnModel, color bool) {
 			countW = n
 		}
 	}
+	// "  " + bar + "   " + count + "   " precedes the path.
+	barW := barWidthFor(m.Width, 2+3+countW+3)
+	pathW := pathBudget(m.Width, 2+barW+3+countW+3)
 	// Files arrive sorted by descending commit count, so the first is the peak.
 	maxC := m.Files[0].Commits
 	for _, f := range m.Files {
 		filled := 0
 		if maxC > 0 {
-			filled = int(float64(f.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+			filled = int(float64(f.Commits)/float64(maxC)*float64(barW) + 0.5)
 		}
 		if filled < 1 {
 			filled = 1 // always show a sliver so every file reads as present
 		}
-		if filled > contribBarW {
-			filled = contribBarW
+		if filled > barW {
+			filled = barW
 		}
 		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
-			strings.Repeat(" ", contribBarW-filled)
+			strings.Repeat(" ", barW-filled)
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
-		fmt.Fprintf(w, "  %s   %s   %s\n", bar, count, f.Path)
+		fmt.Fprintf(w, "  %s   %s   %s\n", bar, count, elidePath(f.Path, pathW))
 	}
 
 	fmt.Fprintln(w)
@@ -254,8 +268,21 @@ func Branches(w io.Writer, m BranchesModel, color bool) {
 			dateW = n
 		}
 	}
-	if nameW > 32 {
-		nameW = 32
+	maxNameW := 32
+	if m.Width > 0 {
+		// marker(2) + name + gap(3) + track + gap(3) + date + gap(3) precedes
+		// the author; whatever's left caps the name column, bounded so it
+		// never collapses to unreadable.
+		avail := m.Width - 2 - 3 - trackW - 3 - dateW - 3
+		if avail < 8 {
+			avail = 8
+		}
+		if avail < maxNameW {
+			maxNameW = avail
+		}
+	}
+	if nameW > maxNameW {
+		nameW = maxNameW
 	}
 
 	for _, b := range m.Branches {
@@ -404,10 +431,23 @@ func buildGrid(days []aggregate.DayCount, now time.Time) (grid [7][]cell, cols, 
 
 func (p palette) heatmap(w io.Writer, m Model) {
 	grid, cols, max := buildGrid(m.Days, m.Now)
+	// Each column costs 2 chars (glyph + space) after a 2-char indent. When
+	// width is known and the full range doesn't fit, show the most recent
+	// columns (drop the oldest) rather than overflowing the line.
+	startCol := 0
+	if m.Width > 0 {
+		maxCols := (m.Width - 2) / 2
+		if maxCols < 1 {
+			maxCols = 1
+		}
+		if cols > maxCols {
+			startCol = cols - maxCols
+		}
+	}
 	for r := 0; r < 7; r++ {
 		var b strings.Builder
 		b.WriteString("  ")
-		for col := 0; col < cols; col++ {
+		for col := startCol; col < cols; col++ {
 			b.WriteString(p.cellGlyph(grid[r][col], max))
 			b.WriteByte(' ')
 		}
@@ -455,7 +495,7 @@ func level(count, max int) int {
 	}
 }
 
-func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
+func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int) {
 	if len(cs) == 0 {
 		fmt.Fprintln(w, "  "+p.c(cLabel, "no commits in range"))
 		return
@@ -472,31 +512,33 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor) {
 	if nameW > 16 {
 		nameW = 16
 	}
+	// "  " + name + "   " + bar + "   " + count precedes the newline.
+	barW := barWidthFor(width, 2+nameW+3+3+countW)
 	maxC := cs[0].Commits
 	for _, c := range cs {
 		name := truncate(c.Name, nameW)
 		filled := 0
 		if maxC > 0 {
-			filled = int(float64(c.Commits)/float64(maxC)*float64(contribBarW) + 0.5)
+			filled = int(float64(c.Commits)/float64(maxC)*float64(barW) + 0.5)
 		}
 		if filled < 1 {
 			filled = 1 // always show a sliver so every contributor reads as present
 		}
-		if filled > contribBarW {
-			filled = contribBarW
+		if filled > barW {
+			filled = barW
 		}
 		// Fill-only bar: a green run padded with spaces (no track). Compact
 		// enough to keep rows tight, but with no dim block to stack up; the
 		// space padding still lines the counts up.
 		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
-			strings.Repeat(" ", contribBarW-filled)
+			strings.Repeat(" ", barW-filled)
 		pad := strings.Repeat(" ", nameW-runeLen(name))
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
 		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, bar, count)
 	}
 }
 
-func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChurn) {
+func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChurn, width int) {
 	var pct string
 	switch {
 	case !g.HasPct:
@@ -526,11 +568,13 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  "+p.c(cLabel, "hot files"))
+		// "    " + count + "   " precedes the path.
+		pathW := pathBudget(width, 4+countW+3)
 		for _, f := range hot {
 			// Count-first keeps the numbers aligned and the (long) paths from
 			// wrapping mid-string the way an inline list does.
 			count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
-			fmt.Fprintf(w, "    %s   %s\n", count, f.Path)
+			fmt.Fprintf(w, "    %s   %s\n", count, elidePath(f.Path, pathW))
 		}
 	}
 }
@@ -672,4 +716,73 @@ func truncate(s string, max int) string {
 		return string(r[:max])
 	}
 	return string(r[:max-1]) + "…"
+}
+
+// barWidthFor scales a fill-bar to fit within width, given overhead columns
+// already spent on the rest of the row (indent, name/count columns, gaps).
+// width <= 0 means unknown/unbounded, so the bar keeps its original fixed
+// width (today's behavior; piped output stays stable). Otherwise the bar
+// never grows past contribBarW and never shrinks below minBarW, so it keeps
+// reading as a bar even on very narrow terminals (rows may still overflow —
+// this only guards against negative or zero widths).
+func barWidthFor(width, overhead int) int {
+	if width <= 0 {
+		return contribBarW
+	}
+	avail := width - overhead
+	if avail > contribBarW {
+		return contribBarW
+	}
+	if avail < minBarW {
+		return minBarW
+	}
+	return avail
+}
+
+// pathBudget derives the max path length for elidePath from a total width
+// and the columns already spent on the rest of the row. It returns 0 (no
+// limit) when width is unknown/unbounded; otherwise it never returns
+// less than a minimum viable path length, since the row overhead alone
+// can exceed width on very narrow terminals.
+func pathBudget(width, overhead int) int {
+	if width <= 0 {
+		return 0
+	}
+	const minPathW = 4
+	b := width - overhead
+	if b < minPathW {
+		return minPathW
+	}
+	return b
+}
+
+// elidePath shortens path to at most maxLen runes, keeping the final path
+// segment (the filename) fully visible and eliding from the middle of the
+// leading directory portion — long terraform-style paths stay readable
+// instead of just running off the line. maxLen <= 0 means unbounded: the
+// path is returned unchanged (used when the terminal width is unknown, so
+// piped output keeps today's behavior).
+func elidePath(path string, maxLen int) string {
+	if maxLen <= 0 {
+		return path
+	}
+	r := []rune(path)
+	if len(r) <= maxLen {
+		return path
+	}
+	const ellipsis = "…"
+	base := path
+	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
+		base = path[idx+1:]
+	}
+	baseRunes := []rune(base)
+	if len(baseRunes) >= maxLen-1 {
+		// Even the filename alone doesn't fit; truncate its tail.
+		return truncate(base, maxLen)
+	}
+	headBudget := maxLen - len(baseRunes) - runeLen(ellipsis)
+	if headBudget < 0 {
+		headBudget = 0
+	}
+	return string(r[:headBudget]) + ellipsis + base
 }
