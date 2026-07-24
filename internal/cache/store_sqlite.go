@@ -12,6 +12,8 @@
 //	meta(key TEXT PRIMARY KEY, value TEXT)
 //	  - "version"   -> schema version, as text
 //	  - "last_hash" -> HEAD hash the cache was built from
+//	  - "basis"     -> date basis ("author"/"commit") the days rows were
+//	                   bucketed on; see the basis discussion below
 //	days(day TEXT PRIMARY KEY, commits INTEGER, insertions INTEGER,
 //	     deletions INTEGER, authors_json TEXT, files_json TEXT)
 //	  - one row per calendar day (matching aggregate.Aggregates.Days keys);
@@ -25,6 +27,12 @@
 // Save replaces the whole cache within a single transaction (delete + insert),
 // which is atomic from sqlite's point of view: a crash mid-write leaves the
 // previous committed state intact.
+//
+// The cache stores commits already bucketed by day (see aggregate.Merge), so
+// an author-bucketed database and a commit-bucketed database are not
+// interchangeable. As with the gob store, each basis gets its own database
+// file (aggregates-author.db / aggregates-commit.db), and the basis is also
+// stamped into the meta table and re-checked on Load as a second guard.
 package cache
 
 import (
@@ -39,8 +47,6 @@ import (
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
 )
-
-const sqliteFileName = "aggregates.db"
 
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -61,16 +67,19 @@ CREATE TABLE IF NOT EXISTS author_names (
 );
 `
 
-// SQLiteStore is the opt-in cache backend built with `-tags sqlite`.
+// SQLiteStore is the opt-in cache backend built with `-tags sqlite`, scoped
+// to one date basis.
 type SQLiteStore struct {
-	path string
+	path  string
+	basis aggregate.DateBasis
 }
 
-// New returns a Backend rooted at the given git directory. Built with `-tags
-// sqlite`, this returns the sqlite-backed store; without the tag, New (in
-// store_gob.go) returns the default gob store instead.
-func New(gitDir string) Backend {
-	return &SQLiteStore{path: filepath.Join(gitDir, dirName, sqliteFileName)}
+// New returns a Backend rooted at the given git directory, scoped to basis.
+// Built with `-tags sqlite`, this returns the sqlite-backed store; without
+// the tag, New (in store_gob.go) returns the default gob store instead.
+func New(gitDir string, basis aggregate.DateBasis) Backend {
+	fileName := "aggregates-" + string(basis) + ".db"
+	return &SQLiteStore{path: filepath.Join(gitDir, dirName, fileName), basis: basis}
 }
 
 func (s *SQLiteStore) open() (*sql.DB, error) {
@@ -89,8 +98,8 @@ func (s *SQLiteStore) open() (*sql.DB, error) {
 }
 
 // Load returns the cached aggregates and the HEAD hash they were built from. ok
-// is false on any miss (absent, unreadable, or version mismatch); callers should
-// then rebuild from full history.
+// is false on any miss (absent, unreadable, version mismatch, or a basis that
+// doesn't match this Store's); callers should then rebuild from full history.
 func (s *SQLiteStore) Load() (agg *aggregate.Aggregates, lastHash string, ok bool) {
 	db, err := s.open()
 	if err != nil {
@@ -104,6 +113,10 @@ func (s *SQLiteStore) Load() (agg *aggregate.Aggregates, lastHash string, ok boo
 	}
 	gotVersion, err := strconv.Atoi(versionStr)
 	if err != nil || gotVersion != version {
+		return nil, "", false
+	}
+	var basisStr string
+	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'basis'`).Scan(&basisStr); err != nil || aggregate.DateBasis(basisStr) != s.basis {
 		return nil, "", false
 	}
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'last_hash'`).Scan(&lastHash); err != nil {
@@ -211,6 +224,10 @@ func (s *SQLiteStore) Save(agg *aggregate.Aggregates, lastHash string) error {
 
 	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('version', ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, strconv.Itoa(version)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('basis', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(s.basis)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO meta (key, value) VALUES ('last_hash', ?)
