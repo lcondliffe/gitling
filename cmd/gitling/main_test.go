@@ -208,7 +208,8 @@ func TestConfigPath(t *testing.T) {
 		t.Setenv("GITLING_CONFIG", "")
 		t.Setenv("XDG_CONFIG_HOME", "")
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		t.Setenv("HOME", home)        // os.UserHomeDir reads HOME on Unix...
+		t.Setenv("USERPROFILE", home) // ...and USERPROFILE on Windows.
 		got, err := configPath("")
 		want := filepath.Join(home, ".config", "gitling", "config.json")
 		if err != nil || got != want {
