@@ -60,9 +60,41 @@ gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
+gitling --color=always   # force color even when stdout isn't a terminal
+gitling --config ~/gitling.json  # use an explicit config file
 ```
 
-Color is also auto-disabled when stdout isn't a terminal or `NO_COLOR` is set.
+### Color
+
+`--color` takes `always`, `never`, or `auto` (the default). `auto` honors the
+[`NO_COLOR`](https://no-color.org/) convention and auto-disables color when
+stdout isn't a terminal; `always` forces color on even when piping into a
+pager or a screenshot/SVG renderer; `never` forces it off. `--no-color` is
+kept as a back-compat alias for `--color=never` and always wins if both are
+given.
+
+### Config file
+
+gitling optionally reads defaults from a JSON config file at
+`$XDG_CONFIG_HOME/gitling/config.json`, falling back to
+`~/.config/gitling/config.json` when `XDG_CONFIG_HOME` is unset. Override the
+path with `--config <path>` or the `GITLING_CONFIG` environment variable. The
+file is entirely optional — a missing file is not an error, but a malformed
+one is reported to stderr.
+
+Supported keys, all optional:
+
+```json
+{
+  "since": "30d",
+  "color": "auto",
+  "bucket": "week"
+}
+```
+
+Precedence: command-line flags always override the config file, which
+overrides gitling's built-in defaults. Panel toggles aren't yet
+config-driven; that's left as future work.
 
 ## How it works
 
