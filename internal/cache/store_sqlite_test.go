@@ -1,16 +1,18 @@
+//go:build sqlite
+
 package cache
 
 import (
-	"encoding/gob"
-	"os"
+	"database/sql"
+	"strconv"
 	"testing"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
 )
 
-func TestSaveLoadRoundTrip(t *testing.T) {
+func TestSQLiteSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	s := New(dir)
+	s := New(dir).(*SQLiteStore)
 
 	agg := aggregate.New()
 	agg.Days["2024-06-02"] = aggregate.DayBucket{
@@ -40,40 +42,33 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadMissing(t *testing.T) {
-	s := New(t.TempDir())
+func TestSQLiteLoadMissing(t *testing.T) {
+	s := New(t.TempDir()).(*SQLiteStore)
 	if _, _, ok := s.Load(); ok {
 		t.Error("Load on missing cache returned ok = true")
 	}
 }
 
-func TestLoadVersionMismatch(t *testing.T) {
+func TestSQLiteLoadVersionMismatch(t *testing.T) {
 	dir := t.TempDir()
-	s := New(dir)
-	// Hand-write a payload with a stale version.
-	if err := os.MkdirAll(dirFor(s), 0o755); err != nil {
+	s := New(dir).(*SQLiteStore)
+
+	// Save a valid cache, then hand-write a stale version into meta.
+	agg := aggregate.New()
+	if err := s.Save(agg, "x"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.Create(s.path)
+
+	db, err := sql.Open("sqlite", s.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gob.NewEncoder(f).Encode(payload{Version: version - 1, LastHash: "x"}); err != nil {
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE meta SET value = ? WHERE key = 'version'`, strconv.Itoa(version-1)); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
 
 	if _, _, ok := s.Load(); ok {
 		t.Error("Load with stale version returned ok = true, want false (forces rebuild)")
 	}
-}
-
-// dirFor returns the directory portion of the store's path.
-func dirFor(s *Store) string {
-	for i := len(s.path) - 1; i >= 0; i-- {
-		if s.path[i] == os.PathSeparator {
-			return s.path[:i]
-		}
-	}
-	return "."
 }
