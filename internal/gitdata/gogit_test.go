@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -147,6 +148,52 @@ func TestGogitCommits(t *testing.T) {
 	}
 	if len(inc) != 1 || inc[0].Hash != second.Hash {
 		t.Fatalf("incremental commits = %+v, want just %q", inc, second.Hash)
+	}
+}
+
+func TestGogitRecentCommits(t *testing.T) {
+	dir := newFixtureRepo(t)
+	// Land the feature branch as a merge commit, the way a merged PR arrives.
+	runGit(t, dir, "merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #7 from test/feature\n\nfeature work")
+
+	g, err := openGogit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := g.RecentCommits(0); err != nil || got != nil {
+		t.Errorf("RecentCommits(0) = %v, %v; want nil, nil", got, err)
+	}
+
+	commits, err := g.RecentCommits(2)
+	if err != nil {
+		t.Fatalf("RecentCommits: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("got %d commits, want the 2 requested: %+v", len(commits), commits)
+	}
+
+	merge := commits[0] // newest first
+	if !merge.Merge {
+		t.Errorf("newest commit should be the merge: %+v", merge)
+	}
+	if merge.PR != 7 || merge.Subject != "feature work" {
+		t.Errorf("merge subject/PR = %q/%d, want %q/7", merge.Subject, merge.PR, "feature work")
+	}
+	if merge.Author != "Test Author" || merge.Time.IsZero() {
+		t.Errorf("merge author/time = %q/%v", merge.Author, merge.Time)
+	}
+	if len(merge.Short) != 7 || !strings.HasPrefix(merge.Hash, merge.Short) {
+		t.Errorf("short hash %q should be a 7-char prefix of %q", merge.Short, merge.Hash)
+	}
+
+	// Asking for more than the history holds returns everything available.
+	all, err := g.RecentCommits(50)
+	if err != nil {
+		t.Fatalf("RecentCommits(50): %v", err)
+	}
+	if len(all) != 4 { // 2 on main + 1 on feature + the merge
+		t.Errorf("got %d commits, want the whole history (4): %+v", len(all), all)
 	}
 }
 

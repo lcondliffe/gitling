@@ -32,6 +32,7 @@ type Model struct {
 	Contributors []aggregate.Contributor
 	Growth       aggregate.Growth
 	HotFiles     []aggregate.FileChurn
+	Recent       []gitdata.RecentCommit
 	Now          time.Time
 	Width        int
 }
@@ -115,6 +116,13 @@ func Dashboard(w io.Writer, m Model, color bool) {
 	p.header(w, "Activity", m.RangeLabel)
 	fmt.Fprintln(w)
 	p.heatmap(w, m)
+
+	if len(m.Recent) > 0 {
+		fmt.Fprintln(w)
+		p.header(w, "Recent", fmt.Sprintf("%d %s", len(m.Recent), plural(len(m.Recent), "commit", "commits")))
+		fmt.Fprintln(w)
+		p.recent(w, m.Recent, m.Now, m.Width)
+	}
 
 	fmt.Fprintln(w)
 	p.header(w, "Top contributors", "")
@@ -536,6 +544,85 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
 		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, bar, count)
 	}
+}
+
+// recent draws the newest commits at the tip of HEAD, one per line:
+//
+//	<short hash>  <#PR>  <subject>  <author>  <how long ago>
+//
+// The PR column is dropped entirely when nothing in the list carries a
+// pull-request number, so repos that don't merge through PRs don't pay for a
+// column of blanks. The subject is the flexible column: it absorbs whatever
+// width is left after the fixed ones, and is truncated (never wrapped) so each
+// commit stays on exactly one line.
+//
+// cs must be non-empty; the caller drops the whole panel when there is nothing
+// to show rather than printing an empty-state line.
+func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, width int) {
+	hashW, prW, authorW, agoW, subjectW := 0, 0, 0, 0, 0
+	for _, c := range cs {
+		if n := runeLen(c.Short); n > hashW {
+			hashW = n
+		}
+		if n := runeLen(c.Subject); n > subjectW {
+			subjectW = n
+		}
+		if n := runeLen(prLabel(c)); n > prW {
+			prW = n
+		}
+		if n := runeLen(c.Author); n > authorW {
+			authorW = n
+		}
+		if n := runeLen(humanAgo(c.Time, now)); n > agoW {
+			agoW = n
+		}
+	}
+	if authorW > 16 {
+		authorW = 16
+	}
+
+	// "  " + hash + "  " [+ pr + "  "] + subject + "  " + author + "  " + ago.
+	overhead := 2 + hashW + 2 + 2 + authorW + 2 + agoW
+	if prW > 0 {
+		overhead += prW + 2
+	}
+	// The subject column is as wide as its longest entry, shrunk to fit the
+	// terminal when the width is known. Width 0 (unknown/piped) keeps the full
+	// subjects, as the other panels do.
+	if width > 0 {
+		const minSubjectW = 12
+		if avail := max(width-overhead, minSubjectW); avail < subjectW {
+			subjectW = avail
+		}
+	}
+
+	for _, c := range cs {
+		var b strings.Builder
+		b.WriteString("  " + p.c(cLabel, c.Short) + strings.Repeat(" ", hashW-runeLen(c.Short)) + "  ")
+		if prW > 0 {
+			pr := prLabel(c)
+			code := cAccent
+			if pr == "" {
+				pr, code = "·", cLabel // a placeholder keeps the subject column aligned
+			}
+			b.WriteString(p.c(code, pr) + strings.Repeat(" ", prW-runeLen(pr)) + "  ")
+		}
+		subject := truncate(c.Subject, subjectW)
+		b.WriteString(subject + strings.Repeat(" ", subjectW-runeLen(subject)) + "  ")
+		author := truncate(c.Author, authorW)
+		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-runeLen(author)) + "  ")
+		b.WriteString(p.c(cLabel, humanAgo(c.Time, now)))
+		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
+	}
+}
+
+// prLabel is the plain (uncolored) pull-request cell, empty when the commit
+// carries no discoverable PR number.
+func prLabel(c gitdata.RecentCommit) string {
+	if c.PR <= 0 {
+		return ""
+	}
+	return "#" + strconv.Itoa(c.PR)
 }
 
 func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChurn, width int) {

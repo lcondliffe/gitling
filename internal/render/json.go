@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
 // JSON prints the dashboard model as stable, machine-readable data for scripts
@@ -45,6 +46,7 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 			Series:   m.Growth.Spark,
 		},
 		HotFiles: jsonHotFiles(m.HotFiles),
+		Recent:   jsonRecents(m.Recent),
 	}
 
 	enc := json.NewEncoder(w)
@@ -60,6 +62,19 @@ type jsonModel struct {
 	Contributors []jsonContributor `json:"contributors"`
 	Growth       jsonGrowth        `json:"growth"`
 	HotFiles     []jsonHotFile     `json:"hot_files"`
+	Recent       []jsonRecent      `json:"recent"`
+}
+
+// jsonRecent is one commit at the tip of HEAD. PR is null rather than 0 when no
+// pull-request number was found, so consumers can tell "no PR" from "PR 0".
+type jsonRecent struct {
+	Hash    string `json:"hash"`
+	Short   string `json:"short"`
+	Subject string `json:"subject"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	PR      *int   `json:"pr"`
+	Merge   bool   `json:"merge"`
 }
 
 type jsonVitals struct {
@@ -140,6 +155,27 @@ func jsonContributors(contributors []aggregate.Contributor) []jsonContributor {
 			Email:   c.Email,
 			Name:    c.Name,
 			Commits: c.Commits,
+		})
+	}
+	return out
+}
+
+func jsonRecents(commits []gitdata.RecentCommit) []jsonRecent {
+	out := make([]jsonRecent, 0, len(commits))
+	for _, c := range commits {
+		var pr *int
+		if c.PR > 0 {
+			n := c.PR
+			pr = &n
+		}
+		out = append(out, jsonRecent{
+			Hash:    c.Hash,
+			Short:   c.Short,
+			Subject: c.Subject,
+			Author:  c.Author,
+			Date:    c.Time.Format(time.RFC3339),
+			PR:      pr,
+			Merge:   c.Merge,
 		})
 	}
 	return out

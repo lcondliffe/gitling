@@ -160,8 +160,7 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig(valid) error: %v", err)
 	}
-	want := config{Since: "30d", Color: "always", Bucket: "week"}
-	if cfg != want {
+	if want := (config{Since: "30d", Color: "always", Bucket: "week"}); cfg != want {
 		t.Errorf("loadConfig(valid) = %+v, want %+v", cfg, want)
 	}
 
@@ -176,6 +175,23 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if cfg.Since != "7d" {
 		t.Errorf("loadConfig(extra).Since = %q, want %q", cfg.Since, "7d")
+	}
+
+	// "recent" is a pointer so an explicit 0 (hide the panel) is
+	// distinguishable from the key being absent.
+	recentZero := filepath.Join(dir, "recent-zero.json")
+	if err := os.WriteFile(recentZero, []byte(`{"recent":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadConfig(recentZero)
+	if err != nil {
+		t.Fatalf("loadConfig(recent-zero) error: %v", err)
+	}
+	if cfg.Recent == nil || *cfg.Recent != 0 {
+		t.Errorf("loadConfig(recent-zero).Recent = %v, want a pointer to 0", cfg.Recent)
+	}
+	if cfg, err := loadConfig(valid); err != nil || cfg.Recent != nil {
+		t.Errorf("config without a recent key should leave Recent nil, got %v (%v)", cfg.Recent, err)
 	}
 
 	// Malformed JSON is a clear error.
@@ -236,7 +252,7 @@ func TestConfigPath(t *testing.T) {
 func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month"}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month","recent":10}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := loadConfig(cfgPath)
@@ -248,6 +264,7 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	since := fs.String("since", "", "")
 	color := fs.String("color", "auto", "")
 	bucket := fs.String("bucket", "day", "")
+	recent := fs.Int("recent", defaultRecent, "")
 	if err := fs.Parse([]string{"--since", "7d"}); err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +281,9 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	if !explicit["color"] && cfg.Color != "" {
 		*color = cfg.Color
 	}
+	if !explicit["recent"] && cfg.Recent != nil {
+		*recent = *cfg.Recent
+	}
 
 	// --since was explicit: flag value wins over config.
 	if *since != "7d" {
@@ -275,5 +295,8 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	}
 	if *color != "never" {
 		t.Errorf("color = %q, want %q (config should fill unset flag)", *color, "never")
+	}
+	if *recent != 10 {
+		t.Errorf("recent = %d, want 10 (config should fill unset flag)", *recent)
 	}
 }

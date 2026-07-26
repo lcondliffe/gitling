@@ -335,6 +335,47 @@ func (g *gogitRepo) Commits(revRange string) ([]Commit, error) {
 	return commits, nil
 }
 
+// RecentCommits returns up to limit commits from the tip of HEAD, newest first,
+// merges included. Short hashes are fixed at 7 characters here, where the
+// shell-out backend defers to git's own abbreviation length (%h).
+func (g *gogitRepo) RecentCommits(limit int) ([]RecentCommit, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	head, err := g.repo.Head()
+	if err != nil {
+		return nil, err
+	}
+	logIter, err := g.repo.Log(&git.LogOptions{From: head.Hash(), Order: git.LogOrderCommitterTime})
+	if err != nil {
+		return nil, err
+	}
+	defer logIter.Close()
+
+	var commits []RecentCommit
+	err = logIter.ForEach(func(c *object.Commit) error {
+		hash := c.Hash.String()
+		subject, body, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
+		rc := RecentCommit{
+			Hash:   hash,
+			Short:  hash[:7],
+			Author: c.Author.Name,
+			Time:   c.Committer.When,
+			Merge:  c.NumParents() > 1,
+		}
+		rc.Subject, rc.PR = parseSubject(subject, body)
+		commits = append(commits, rc)
+		if len(commits) == limit {
+			return storer.ErrStop
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return commits, nil
+}
+
 // aheadBehind counts commits reachable from a but not b ("ahead") and from b
 // but not a ("behind"), via their merge-base. This is a straightforward
 // linear-history walk rather than git's optimized graph algorithm: correct

@@ -38,14 +38,19 @@ it on your `PATH`.
 
 ## Output
 
-Four panels, single screen:
+Five panels, single screen:
 
 1. **Repo vitals** — branch, ahead/behind upstream, dirty files, stashes, branches.
 2. **Activity heatmap** — GitHub-style contribution grid (default last 14 weeks),
    5-step intensity, today's cell marked with a hollow square. Total commits and
    current streak below.
-3. **Top contributors** — up to 5 authors by commit count in range, with bars.
-4. **Codebase growth** — total LOC, 6-month percent change, a trend sparkline,
+3. **Recent** — the last 5 commits on HEAD (`--recent <n>`, `0` hides the panel),
+   with the pull-request number when the commit message carries one, the author,
+   and how long ago it landed. Merge commits are included, so PR-merge and
+   squash-merge workflows both show what shipped. Unlike the other panels this
+   one ignores `--since`: "what landed last" is only useful unfiltered.
+4. **Top contributors** — up to 5 authors by commit count in range, with bars.
+5. **Codebase growth** — total LOC, 6-month percent change, a trend sparkline,
    and the hottest files by churn.
 
 ## Usage
@@ -58,6 +63,7 @@ gitling --graph --bucket week --since 1y
 gitling churn --since 1y # file churn: all files, ranked by commit count
 gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
+gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
 gitling --date commit    # bucket by commit date instead of author date
@@ -89,7 +95,8 @@ Supported keys, all optional:
 {
   "since": "30d",
   "color": "auto",
-  "bucket": "week"
+  "bucket": "week",
+  "recent": 5
 }
 ```
 
@@ -101,6 +108,9 @@ config-driven; that's left as future work.
 
 - **gitdata** shells out to `git log --numstat` and a handful of cheap
   plumbing commands. Each commit carries both its author date and commit date.
+  The recent-commits panel is a separate, bounded `git log -n <n>` (merges
+  included) read live on each run rather than served from the cache — it is
+  cheap, and it must reflect the tip exactly.
 - **aggregate** rolls commits up into per-day buckets (counts, line deltas,
   per-author and per-file tallies), keyed by either the author date (default)
   or the commit date, per `--date`. Range queries sum the days in range, so

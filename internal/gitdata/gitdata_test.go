@@ -122,6 +122,82 @@ func TestParseBranches(t *testing.T) {
 	}
 }
 
+func TestParseRecentLog(t *testing.T) {
+	const rs, us = "\x1e", "\x1f"
+	rec := func(fields ...string) string { return rs + strings.Join(fields, us) }
+	sample := rec("h1full", "h1", "Alice", "1700000000", "p1", "fix: land the thing (#18)", "") +
+		rec("h2full", "h2", "Bob", "1700100000", "p1 p2", "Merge pull request #7 from bob/feat", "\nadd the widget\n")
+
+	got := parseRecentLog(sample)
+	if len(got) != 2 {
+		t.Fatalf("got %d commits, want 2", len(got))
+	}
+
+	c0 := got[0]
+	if c0.Hash != "h1full" || c0.Short != "h1" || c0.Author != "Alice" {
+		t.Errorf("c0 header = %+v", c0)
+	}
+	if !c0.Time.Equal(time.Unix(1700000000, 0)) {
+		t.Errorf("c0 Time = %v", c0.Time)
+	}
+	if c0.Merge {
+		t.Error("c0 has one parent, should not be a merge")
+	}
+	if c0.Subject != "fix: land the thing" || c0.PR != 18 {
+		t.Errorf("c0 subject/PR = %q/%d, want %q/18", c0.Subject, c0.PR, "fix: land the thing")
+	}
+
+	c1 := got[1]
+	if !c1.Merge {
+		t.Error("c1 has two parents, should be a merge")
+	}
+	// The merge subject is boilerplate; the body's first line is the real title.
+	if c1.Subject != "add the widget" || c1.PR != 7 {
+		t.Errorf("c1 subject/PR = %q/%d, want %q/7", c1.Subject, c1.PR, "add the widget")
+	}
+}
+
+func TestParseRecentLogEmpty(t *testing.T) {
+	if got := parseRecentLog(""); len(got) != 0 {
+		t.Errorf("parseRecentLog(\"\") = %v, want empty", got)
+	}
+}
+
+func TestParseSubject(t *testing.T) {
+	cases := []struct {
+		name        string
+		subject     string
+		body        string
+		wantSubject string
+		wantPR      int
+	}{
+		{"squash merge", "fix: a thing (#18)", "", "fix: a thing", 18},
+		{"gitlab squash", "fix: a thing (!42)", "", "fix: a thing", 42},
+		{"multi-digit", "feat: x (#12345)", "", "feat: x", 12345},
+		{"plain commit", "chore: tidy up", "", "chore: tidy up", 0},
+		{"parenthetical, not a PR", "fix: handle (edge case)", "", "fix: handle (edge case)", 0},
+		{"trailing hash, no digits", "fix: see (#)", "", "fix: see (#)", 0},
+		{"non-numeric ref", "fix: see (#abc)", "", "fix: see (#abc)", 0},
+		{"trailing junk after number", "fix: x (#12a)", "", "fix: x (#12a)", 0},
+		// Stripping would leave nothing to show, so the subject is kept whole
+		// and the number stays in it rather than being hoisted into its column.
+		{"nothing but the ref", "(#18)", "", "(#18)", 0},
+		{"merge commit with body title", "Merge pull request #7 from a/b", "\nadd the widget\n", "add the widget", 7},
+		{"merge commit, empty body", "Merge pull request #7 from a/b", "", "Merge pull request #7 from a/b", 7},
+		{"merge branch, no PR", "Merge branch 'main' into feat", "", "Merge branch 'main' into feat", 0},
+		{"gitlab merge trailer", "Merge branch 'feat' into 'main'", "add widget\n\nSee merge request group/proj!42", "Merge branch 'feat' into 'main'", 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			subject, pr := parseSubject(tc.subject, tc.body)
+			if subject != tc.wantSubject || pr != tc.wantPR {
+				t.Errorf("parseSubject(%q, %q) = %q/%d, want %q/%d",
+					tc.subject, tc.body, subject, pr, tc.wantSubject, tc.wantPR)
+			}
+		})
+	}
+}
+
 func TestCountLines(t *testing.T) {
 	cases := map[string]int{"": 0, "a\n": 1, "a\nb\n": 2, "a\nb": 2}
 	for in, want := range cases {
