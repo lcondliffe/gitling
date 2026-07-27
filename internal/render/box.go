@@ -38,14 +38,21 @@ func visibleLen(s string) int {
 }
 
 // skipEscape returns the index just past the escape sequence starting at i.
-// Only the SGR sequences this package emits ("\x1b[...m") are expected; an
-// unterminated sequence swallows the rest of the string rather than looping.
+// Only the SGR sequences this package emits ("\x1b[...m") are expected, but
+// commit subjects and author names are arbitrary bytes and may contain a stray
+// ESC, so an unterminated sequence swallows the rest of the string.
+//
+// The return value is clamped to len(s): callers slice with it, and an
+// unterminated sequence would otherwise index one past the end. Today's callers
+// can't reach that (clipVisible returns early whenever the escape would be hit,
+// since bytes after an unterminated ESC don't count toward visibleLen), but that
+// is a subtle invariant to rest a panic on.
 func skipEscape(s string, i int) int {
 	j := i + 1
 	for j < len(s) && s[j] != 'm' {
 		j++
 	}
-	return j + 1
+	return min(j+1, len(s))
 }
 
 // clipVisible truncates s to at most max visible columns, preserving the escape

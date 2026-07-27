@@ -38,12 +38,12 @@ it on your `PATH`.
 
 ## Output
 
-Five boxed panels, single screen. On a terminal at least 100 columns wide they
+Six boxed panels, single screen. On a terminal at least 100 columns wide they
 lay out in two columns; below that, or when the width can't be detected (piped
 or redirected output), they stack into one. `--layout wide|stack` forces either
 shape, and `--layout auto` (the default) picks per terminal:
 
-```
+```text
 ╭─ REPO ──────────────────────────────────────────────────────────────────────╮
 │  ● main   ↑0 ↓0   5 dirty   0 stashes   23 branches                         │
 ╰─────────────────────────────────────────────────────────────────────────────╯
@@ -71,9 +71,10 @@ The panels:
    and how long ago it landed. Merge commits are included, so PR-merge and
    squash-merge workflows both show what shipped. Unlike the other panels this
    one ignores `--since`: "what landed last" is only useful unfiltered.
-4. **Top contributors** — up to 5 authors by commit count in range, with bars.
-5. **Codebase growth** — total LOC, 6-month percent change, and a trend
-   sparkline, alongside a **Hot files** panel of the highest-churn paths.
+4. **Hot files** — the paths with the most commits against them in range.
+5. **Top contributors** — up to 5 authors by commit count in range, with bars.
+6. **Codebase growth** — total LOC, 6-month percent change, and a trend
+   sparkline.
 
 ## Usage
 

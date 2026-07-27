@@ -168,3 +168,22 @@ func TestPackPartsWrapsToWidth(t *testing.T) {
 		t.Errorf("oversized part = %q, want each on its own line", got)
 	}
 }
+
+// FuzzClipVisible guards the invariant the box borders rest on: whatever is
+// thrown at it, the result never exceeds the requested width and never panics.
+// Panel content includes commit subjects and author names, which are arbitrary
+// bytes and may carry a stray or truncated ESC.
+func FuzzClipVisible(f *testing.F) {
+	f.Add("hello", 3)
+	f.Add("\x1b[38;5;40mhi\x1b[0m", 2)
+	f.Add("aaaa\x1b[38;5;40", 5) // unterminated escape at the end
+	f.Add("\x1b", 1)
+	f.Add("■ ■ □", 2)
+	f.Fuzz(func(t *testing.T, s string, max int) {
+		got := clipVisible(s, max)
+		if max > 0 && visibleLen(got) > max {
+			t.Fatalf("clipVisible(%q, %d) = %q: visible width %d exceeds max", s, max, got, visibleLen(got))
+		}
+		padVisible(got, max)
+	})
+}
