@@ -6,7 +6,7 @@ A terminal-native, at-a-glance summary of a git repository: recent activity,
 top contributors, and codebase growth. Run it once at the start of a session to
 orient yourself — it's not a replacement for `git log` or a full TUI.
 
-<img src="docs/screenshot.png" alt="gitling dashboard showing repo vitals, an activity heatmap, top contributors, and codebase growth" width="520">
+<img src="docs/screenshot.png" alt="gitling dashboard: boxed panels in two columns — repo vitals across the top, an activity heatmap and hot files on the left, top contributors and codebase growth on the right, and recent commits along the bottom" width="900">
 
 ## Install
 
