@@ -6,7 +6,7 @@ A terminal-native, at-a-glance summary of a git repository: recent activity,
 top contributors, and codebase growth. Run it once at the start of a session to
 orient yourself — it's not a replacement for `git log` or a full TUI.
 
-<img src="docs/screenshot.png" alt="gitling dashboard showing repo vitals, an activity heatmap, top contributors, and codebase growth" width="520">
+<img src="docs/screenshot.png" alt="gitling dashboard: boxed panels in two columns — repo vitals across the top, an activity heatmap and hot files on the left, top contributors and codebase growth on the right, and recent commits along the bottom" width="900">
 
 ## Install
 
@@ -38,7 +38,29 @@ it on your `PATH`.
 
 ## Output
 
-Five panels, single screen:
+Six boxed panels, single screen. On a terminal at least 100 columns wide they
+lay out in two columns; below that, or when the width can't be detected (piped
+or redirected output), they stack into one. `--layout wide|stack` forces either
+shape, and `--layout auto` (the default) picks per terminal:
+
+```text
+╭─ REPO ──────────────────────────────────────────────────────────────────────╮
+│  ● main   ↑0 ↓0   5 dirty   0 stashes   23 branches                         │
+╰─────────────────────────────────────────────────────────────────────────────╯
+╭─ ACTIVITY · last 14 weeks ─────────────╮ ╭─ TOP CONTRIBUTORS ───────────────╮
+│  · · · · · · · · · · · · · · □         │ │  Ada Lovelace    ██████████  33  │
+│  · · · · · · · · · · · █ · ·           │ │  Alan Turing     ██           7  │
+│  41 commits in range · streak: 1 days  │ ╰──────────────────────────────────╯
+╰────────────────────────────────────────╯ ╭─ CODEBASE GROWTH · 6mo ──────────╮
+╭─ HOT FILES ────────────────────────────╮ │  6,722 LOC  ▲ 18%                │
+│  22   README.md                        │ │              ▁▃▅▇███             │
+╰────────────────────────────────────────╯ ╰──────────────────────────────────╯
+╭─ RECENT · 5 commits ────────────────────────────────────────────────────────╮
+│  2440dfe  #18  fix: make release publishing rerunnable   Ada Lovelace  1d ago│
+╰─────────────────────────────────────────────────────────────────────────────╯
+```
+
+The panels:
 
 1. **Repo vitals** — branch, ahead/behind upstream, dirty files, stashes, branches.
 2. **Activity heatmap** — GitHub-style contribution grid (default last 14 weeks),
@@ -49,9 +71,10 @@ Five panels, single screen:
    and how long ago it landed. Merge commits are included, so PR-merge and
    squash-merge workflows both show what shipped. Unlike the other panels this
    one ignores `--since`: "what landed last" is only useful unfiltered.
-4. **Top contributors** — up to 5 authors by commit count in range, with bars.
-5. **Codebase growth** — total LOC, 6-month percent change, a trend sparkline,
-   and the hottest files by churn.
+4. **Hot files** — the paths with the most commits against them in range.
+5. **Top contributors** — up to 5 authors by commit count in range, with bars.
+6. **Codebase growth** — total LOC, 6-month percent change, and a trend
+   sparkline.
 
 ## Usage
 
@@ -64,6 +87,7 @@ gitling churn --since 1y # file churn: all files, ranked by commit count
 gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
 gitling --recent 10      # list the last 10 commits (0 hides the panel)
+gitling --layout stack   # force one column; --layout wide forces two
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --no-color       # plain output, no ANSI escape codes
 gitling --date commit    # bucket by commit date instead of author date
@@ -96,7 +120,8 @@ Supported keys, all optional:
   "since": "30d",
   "color": "auto",
   "bucket": "week",
-  "recent": 5
+  "recent": 5,
+  "layout": "auto"
 }
 ```
 
@@ -123,7 +148,11 @@ config-driven; that's left as future work.
   very large repos — see below.
 - **render** draws everything with 256-color ANSI chosen to read on both light
   and dark backgrounds, or emits the same model as indented JSON when `--json`
-  is set.
+  is set. Each panel renders its body into a buffer at the width it has been
+  given; a small box/column compositor then frames those bodies and, when the
+  terminal is wide enough, places them side by side. All the width arithmetic
+  measures *visible* columns, skipping ANSI escapes, so color never shifts the
+  layout.
 
 The layers are cleanly separated: the git backend (shell-out by default, with
 an opt-in pure-Go go-git backend — see below) and the cache (gob by default,

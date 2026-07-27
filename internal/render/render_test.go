@@ -134,6 +134,56 @@ func TestContributorsRanksAuthorsWithSummary(t *testing.T) {
 	}
 }
 
+func TestMaxNameWidthGrowsWithSpareRoom(t *testing.T) {
+	// Unknown width keeps the fixed cap so piped output stays stable.
+	if got := maxNameWidth(0, 2); got != 16 {
+		t.Errorf("maxNameWidth(0) = %d, want 16", got)
+	}
+	// Too narrow to give names more than the base cap.
+	if got := maxNameWidth(40, 2); got != 16 {
+		t.Errorf("maxNameWidth(40) = %d, want the base cap 16", got)
+	}
+	// Wide panel: names get everything left after a full-length bar.
+	want := 100 - 2 - 3 - contribBarW - 3 - 2
+	if got := maxNameWidth(100, 2); got != want {
+		t.Errorf("maxNameWidth(100) = %d, want %d", got, want)
+	}
+	// A wider count column eats into the name budget.
+	if got := maxNameWidth(100, 5); got != want-3 {
+		t.Errorf("maxNameWidth(100, countW 5) = %d, want %d", got, want-3)
+	}
+}
+
+func TestContributorsUsesSpareWidthForLongNames(t *testing.T) {
+	const longName = "Margaret Hamilton-Lovelace"
+	cs := []aggregate.Contributor{
+		{Name: longName, Email: "m@example.com", Commits: 9},
+		{Name: "Ada", Email: "ada@example.com", Commits: 4},
+	}
+
+	// Narrow: the name is truncated and the row still fits.
+	var narrow bytes.Buffer
+	Contributors(&narrow, ContributorsModel{Contributors: cs, Width: 50}, false)
+	if strings.Contains(narrow.String(), longName) {
+		t.Errorf("narrow panel should truncate the long name:\n%s", narrow.String())
+	}
+	if !strings.Contains(narrow.String(), "…") {
+		t.Errorf("truncated name should be marked with an ellipsis:\n%s", narrow.String())
+	}
+
+	// Wide: there is room to spare, so the name is shown in full.
+	var wide bytes.Buffer
+	Contributors(&wide, ContributorsModel{Contributors: cs, Width: 100}, false)
+	if !strings.Contains(wide.String(), longName) {
+		t.Errorf("wide panel should show the full name:\n%s", wide.String())
+	}
+	for _, line := range strings.Split(wide.String(), "\n") {
+		if got := visibleLen(line); got > 100 {
+			t.Errorf("row is %d columns wide, want <= 100: %q", got, line)
+		}
+	}
+}
+
 func TestContributorsSingularSummary(t *testing.T) {
 	var buf bytes.Buffer
 	Contributors(&buf, ContributorsModel{
@@ -256,6 +306,125 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	}
 }
 
+// dashboardTestModel is a fully populated model for layout tests.
+func dashboardTestModel(now time.Time) Model {
+	days := buildTestDays(now, 30)
+	return Model{
+		Vitals:       gitdata.Vitals{Branch: "main", HasUpstream: true, Ahead: 2, Behind: 1, DirtyFiles: 3, StashCount: 1, BranchCount: 6},
+		RangeLabel:   "last 30d",
+		Days:         days,
+		TotalCommits: aggregate.TotalCommits(days),
+		Streak:       3,
+		Contributors: []aggregate.Contributor{{Name: "Ada Lovelace", Email: "ada@example.com", Commits: 9}},
+		Growth:       aggregate.Growth{TotalLOC: 1234, Pct: 5, HasPct: true, Spark: []int{100, 200, 300}},
+		HotFiles:     []aggregate.FileChurn{{Path: "internal/render/render.go", Commits: 4}},
+		Recent: []gitdata.RecentCommit{
+			{Short: "abc123d", Subject: "fix: land the thing", Author: "Ada Lovelace", Time: now, PR: 18},
+		},
+		Now: now,
+	}
+}
+
+func TestDashboardNeverExceedsTerminalWidth(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	m := dashboardTestModel(now)
+
+	// Both sides of the grid threshold, and both color modes: color must not
+	// change the geometry, only the bytes.
+	for _, width := range []int{40, 70, 99, 100, 120, 200} {
+		for _, color := range []bool{false, true} {
+			m.Width = width
+			var buf bytes.Buffer
+			Dashboard(&buf, m, color)
+			for _, line := range strings.Split(buf.String(), "\n") {
+				if got := visibleLen(line); got > width {
+					t.Errorf("width %d (color %v): line is %d columns wide:\n%q", width, color, got, line)
+				}
+			}
+		}
+	}
+}
+
+func TestDashboardLayoutSelection(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	m := dashboardTestModel(now)
+
+	// sideBySide only ever appears in the grid, and the surest marker of it is
+	// two box edges on the same line.
+	gridded := func(m Model) bool {
+		var buf bytes.Buffer
+		Dashboard(&buf, m, false)
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if strings.Count(line, boxTL) > 1 {
+				return true
+			}
+		}
+		return false
+	}
+
+	cases := []struct {
+		name   string
+		layout string
+		width  int
+		want   bool
+	}{
+		{"auto goes wide above the threshold", LayoutAuto, minGridWidth, true},
+		{"auto stacks below the threshold", LayoutAuto, minGridWidth - 1, false},
+		{"auto stacks when width is unknown", LayoutAuto, 0, false},
+		{"empty layout means auto", "", 120, true},
+		{"wide forces the grid when narrow", LayoutWide, 60, true},
+		{"wide forces the grid when width is unknown", LayoutWide, 0, true},
+		{"stack forces one column when wide", LayoutStack, 200, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m.Layout, m.Width = tc.layout, tc.width
+			if got := gridded(m); got != tc.want {
+				t.Errorf("gridded = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidLayout(t *testing.T) {
+	for _, ok := range []string{"auto", "wide", "stack", ""} {
+		if !ValidLayout(ok) {
+			t.Errorf("ValidLayout(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"grid", "AUTO", "columns", "1"} {
+		if ValidLayout(bad) {
+			t.Errorf("ValidLayout(%q) = true, want false", bad)
+		}
+	}
+}
+
+func TestDashboardHidesEmptyOptionalPanels(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	for _, width := range []int{0, 120} {
+		m := dashboardTestModel(now)
+		m.Width = width
+		m.Recent = nil
+		m.HotFiles = nil
+
+		var buf bytes.Buffer
+		Dashboard(&buf, m, false)
+		out := buf.String()
+		if strings.Contains(out, "RECENT") {
+			t.Errorf("width %d: recent box should be omitted when empty:\n%s", width, out)
+		}
+		if strings.Contains(out, "HOT FILES") {
+			t.Errorf("width %d: hot files box should be omitted when empty:\n%s", width, out)
+		}
+		// The mandatory panels are still there.
+		for _, want := range []string{"REPO", "ACTIVITY", "TOP CONTRIBUTORS", "CODEBASE GROWTH"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("width %d: missing %s box:\n%s", width, want, out)
+			}
+		}
+	}
+}
+
 func TestRecentListsCommitsWithPRColumn(t *testing.T) {
 	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
 	var buf bytes.Buffer
@@ -268,8 +437,8 @@ func TestRecentListsCommitsWithPRColumn(t *testing.T) {
 	}, false)
 	out := buf.String()
 
-	if !strings.Contains(out, "RECENT  ·  2 commits") {
-		t.Errorf("missing recent header:\n%s", out)
+	if !strings.Contains(out, "RECENT · 2 commits") {
+		t.Errorf("missing recent box title:\n%s", out)
 	}
 	if !strings.Contains(out, "abc123d  #18  fix: land the thing  Ada Lovelace  2h ago") {
 		t.Errorf("missing PR row:\n%s", out)

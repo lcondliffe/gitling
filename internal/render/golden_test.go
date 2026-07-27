@@ -186,6 +186,25 @@ func TestGoldenDashboard(t *testing.T) {
 	checkGolden(t, "dashboard.golden.txt", buf.Bytes())
 }
 
+// The stacked golden above renders at an unknown width (boxes sized to their
+// content). These two pin the width-driven layouts: the two-column grid a wide
+// terminal gets, and the single column a narrow one falls back to.
+func TestGoldenDashboardGrid(t *testing.T) {
+	m := goldenModel()
+	m.Width = 120
+	var buf bytes.Buffer
+	Dashboard(&buf, m, false)
+	checkGolden(t, "dashboard-grid.golden.txt", buf.Bytes())
+}
+
+func TestGoldenDashboardNarrow(t *testing.T) {
+	m := goldenModel()
+	m.Width = 70
+	var buf bytes.Buffer
+	Dashboard(&buf, m, false)
+	checkGolden(t, "dashboard-narrow.golden.txt", buf.Bytes())
+}
+
 func TestGoldenGraph(t *testing.T) {
 	var buf bytes.Buffer
 	Graph(&buf, goldenGraphModel(), false)

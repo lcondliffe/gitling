@@ -62,6 +62,7 @@ func main() {
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	recent := flag.Int("recent", defaultRecent, "number of recent commits to list on the dashboard (0 hides the panel)")
+	layout := flag.String("layout", "auto", "dashboard layout: auto, wide, stack")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
@@ -105,6 +106,9 @@ func main() {
 	if !explicit["recent"] && cfg.Recent != nil {
 		*recent = *cfg.Recent
 	}
+	if !explicit["layout"] && cfg.Layout != "" {
+		*layout = cfg.Layout
+	}
 
 	if *graph {
 		requested = append(requested, "graph")
@@ -136,6 +140,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gitling: invalid --recent %d (must be 0 or more)\n", *recent)
 		os.Exit(2)
 	}
+	if !render.ValidLayout(*layout) {
+		fmt.Fprintf(os.Stderr, "gitling: invalid --layout %q (use auto, wide, or stack)\n", *layout)
+		os.Exit(2)
+	}
 	if err := validateBucket(*bucket); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
@@ -159,7 +167,17 @@ func main() {
 		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, aggregate.DateBasis(*dateBasis), *jsonOutput, *recent, width); err != nil {
+	if err := run(os.Stdout, options{
+		since:     *since,
+		color:     colorEnabled(*color),
+		view:      view,
+		bucket:    *bucket,
+		dateBasis: aggregate.DateBasis(*dateBasis),
+		json:      *jsonOutput,
+		recent:    *recent,
+		layout:    *layout,
+		width:     width,
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -182,6 +200,7 @@ Flags:
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
   --recent <n>     recent commits listed on the dashboard, 0 hides them (default 5)
+  --layout <mode>  dashboard layout: auto, wide, stack (default auto)
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
@@ -192,13 +211,28 @@ Flags:
   --version        print version and exit
 
 Config file (optional, JSON) may set defaults for "since", "color", "bucket",
-and "recent"; command-line flags always override it. --no-color overrides both.
+"recent", and "layout"; command-line flags always override it. --no-color
+overrides both.
 
 Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, dateBasis aggregate.DateBasis, jsonOutput bool, recent, width int) error {
+// options is one run's resolved configuration, after command-line flags, the
+// config file, and terminal detection have all been folded together.
+type options struct {
+	since     string
+	color     bool
+	view      string
+	bucket    string
+	dateBasis aggregate.DateBasis
+	json      bool
+	recent    int
+	layout    string
+	width     int // terminal columns; 0 when unknown (piped or redirected)
+}
+
+func run(stdout io.Writer, o options) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -210,7 +244,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 
 	vitals, _ := repo.Vitals()
 
-	days, err := parseSinceDays(since)
+	days, err := parseSinceDays(o.since)
 	if err != nil {
 		return err
 	}
@@ -219,16 +253,16 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 
 	// The branches view is live git state, independent of the commit-history
 	// aggregate, so serve it before the (potentially expensive) history walk.
-	if !jsonOutput && view == "branches" {
+	if !o.json && o.view == "branches" {
 		branches, err := repo.Branches()
 		if err != nil {
 			return err
 		}
-		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: width}, color)
+		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: o.width}, o.color)
 		return nil
 	}
 
-	store := cache.New(gitDir, dateBasis)
+	store := cache.New(gitDir, o.dateBasis)
 	agg, lastHash, ok := store.Load()
 	if !ok {
 		agg = aggregate.New()
@@ -254,7 +288,7 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 			if err != nil {
 				return err
 			}
-			agg.Merge(commits, dateBasis)
+			agg.Merge(commits, o.dateBasis)
 			if err := store.Save(agg, head); err != nil {
 				// Cache is an optimization, not correctness; warn and continue.
 				fmt.Fprintln(os.Stderr, "gitling: warning: cache write failed:", err)
@@ -264,43 +298,44 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 
 	m := render.Model{
 		Vitals:     vitals,
-		RangeLabel: rangeLabel(since),
+		RangeLabel: rangeLabel(o.since),
 		Now:        now,
-		Width:      width,
+		Width:      o.width,
+		Layout:     o.layout,
 	}
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
 	m.Streak = aggregate.Streak(m.Days)
-	buckets := aggregate.BucketCounts(m.Days, bucket)
-	if !jsonOutput && view == "graph" {
+	buckets := aggregate.BucketCounts(m.Days, o.bucket)
+	if !o.json && o.view == "graph" {
 		render.Graph(stdout, render.GraphModel{
 			RangeLabel:   m.RangeLabel,
-			Bucket:       bucket,
+			Bucket:       o.bucket,
 			Days:         m.Days,
 			Buckets:      buckets,
 			TotalCommits: m.TotalCommits,
 			Streak:       m.Streak,
 			Now:          now,
-			Width:        width,
-		}, color)
+			Width:        o.width,
+		}, o.color)
 		return nil
 	}
-	if !jsonOutput && view == "churn" {
+	if !o.json && o.view == "churn" {
 		render.Churn(stdout, render.ChurnModel{
 			RangeLabel: m.RangeLabel,
 			Files:      agg.HotFiles(sinceTime, now, 0), // 0 == all files
 			Now:        now,
-			Width:      width,
-		}, color)
+			Width:      o.width,
+		}, o.color)
 		return nil
 	}
-	if !jsonOutput && view == "contributors" {
+	if !o.json && o.view == "contributors" {
 		render.Contributors(stdout, render.ContributorsModel{
 			RangeLabel:   m.RangeLabel,
 			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors
 			Now:          now,
-			Width:        width,
-		}, color)
+			Width:        o.width,
+		}, o.color)
 		return nil
 	}
 
@@ -310,18 +345,18 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 	// Recent commits are live git state (and ignore --since: "what landed last"
 	// is only useful unfiltered), so they come straight from the log rather than
 	// the cached aggregate. Skipped on an empty repo, where there is no HEAD.
-	if recent > 0 && headErr == nil {
-		commits, err := repo.RecentCommits(recent)
+	if o.recent > 0 && headErr == nil {
+		commits, err := repo.RecentCommits(o.recent)
 		if err != nil {
 			return err
 		}
 		m.Recent = commits
 	}
-	if jsonOutput {
-		return render.JSON(stdout, m, bucket, buckets)
+	if o.json {
+		return render.JSON(stdout, m, o.bucket, buckets)
 	}
 
-	render.Dashboard(stdout, m, color)
+	render.Dashboard(stdout, m, o.color)
 	return nil
 }
 
