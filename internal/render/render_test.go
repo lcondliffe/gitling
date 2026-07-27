@@ -183,7 +183,11 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 			Spark:    []int{40, 42},
 		},
 		HotFiles: []aggregate.FileChurn{{Path: "main.go", Commits: 2}},
-		Now:      start,
+		Recent: []gitdata.RecentCommit{
+			{Hash: "abc123def", Short: "abc123d", Subject: "fix: a thing", Author: "Ada", Time: start, PR: 18},
+			{Hash: "0987654321", Short: "0987654", Subject: "chore: tidy", Author: "Ada", Time: start},
+		},
+		Now: start,
 	}
 	buckets := []aggregate.PeriodCount{{Start: start, End: start, Count: 2}}
 
@@ -238,6 +242,90 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	if _, ok := hotFile["Path"]; ok {
 		t.Fatalf("hot file leaked PascalCase key: %#v", hotFile)
 	}
+	recent := got["recent"].([]any)
+	first := recent[0].(map[string]any)
+	if first["short"] != "abc123d" || first["subject"] != "fix: a thing" || first["pr"] != float64(18) {
+		t.Fatalf("recent[0] = %#v", first)
+	}
+	if first["date"] != "2024-06-01T12:00:00Z" {
+		t.Fatalf("recent[0] date = %#v", first["date"])
+	}
+	// A commit with no PR must serialize as null, not 0.
+	if pr, ok := recent[1].(map[string]any)["pr"]; !ok || pr != nil {
+		t.Fatalf("recent[1] pr = %#v, want null", pr)
+	}
+}
+
+func TestRecentListsCommitsWithPRColumn(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{
+		Now: now,
+		Recent: []gitdata.RecentCommit{
+			{Short: "abc123d", Subject: "fix: land the thing", Author: "Ada Lovelace", Time: now.Add(-2 * time.Hour), PR: 18},
+			{Short: "0987654", Subject: "chore: tidy up", Author: "Alan Turing", Time: now.Add(-3 * 24 * time.Hour)},
+		},
+	}, false)
+	out := buf.String()
+
+	if !strings.Contains(out, "RECENT  ·  2 commits") {
+		t.Errorf("missing recent header:\n%s", out)
+	}
+	if !strings.Contains(out, "abc123d  #18  fix: land the thing  Ada Lovelace  2h ago") {
+		t.Errorf("missing PR row:\n%s", out)
+	}
+	// Commits with no PR get a placeholder so the subject column stays aligned.
+	if !strings.Contains(out, "0987654  ·    chore: tidy up       Alan Turing   3d ago") {
+		t.Errorf("missing no-PR row:\n%s", out)
+	}
+}
+
+func TestRecentOmitsPRColumnWhenNoPRs(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{
+		Now: now,
+		Recent: []gitdata.RecentCommit{
+			{Short: "abc123d", Subject: "chore: tidy up", Author: "Ada", Time: now},
+		},
+	}, false)
+
+	if got := buf.String(); !strings.Contains(got, "abc123d  chore: tidy up  Ada  just now") {
+		t.Errorf("PR column should be dropped entirely:\n%s", got)
+	}
+}
+
+func TestRecentPanelHiddenWhenEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{Now: time.Now()}, false)
+	if strings.Contains(buf.String(), "RECENT") {
+		t.Errorf("recent panel should be omitted when there are no commits:\n%s", buf.String())
+	}
+}
+
+func TestRecentTruncatesSubjectToWidth(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{
+		Now:   now,
+		Width: 60,
+		Recent: []gitdata.RecentCommit{
+			{Short: "abc123d", Subject: strings.Repeat("long ", 40), Author: "Ada", Time: now},
+		},
+	}, false)
+
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, "abc123d") {
+			if runeLen(line) > 60 {
+				t.Errorf("recent row is %d wide, want <= 60:\n%q", runeLen(line), line)
+			}
+			if !strings.Contains(line, "…") {
+				t.Errorf("long subject should be elided: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatal("no recent row rendered")
 }
 
 func TestBranchesRendering(t *testing.T) {
@@ -478,8 +566,12 @@ func TestWidthOneDoesNotPanicAcrossAllViews(t *testing.T) {
 				TotalCommits: aggregate.TotalCommits(days),
 				Contributors: []aggregate.Contributor{{Name: longName, Email: "a@example.com", Commits: 9}},
 				HotFiles:     []aggregate.FileChurn{{Path: longPath, Commits: 4}},
-				Now:          now,
-				Width:        1,
+				Recent: []gitdata.RecentCommit{
+					{Short: "abc123d", Subject: longPath, Author: longName, Time: now, PR: 12345},
+					{Short: "0987654", Subject: "x", Author: "Ada", Time: now},
+				},
+				Now:   now,
+				Width: 1,
 			}, false)
 		},
 		"Contributors": func(buf *bytes.Buffer) {

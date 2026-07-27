@@ -13,6 +13,7 @@ type Backend interface {
 	Vitals() (Vitals, error)
 	Branches() ([]Branch, error)
 	Commits(revRange string) ([]Commit, error)
+	RecentCommits(limit int) ([]RecentCommit, error)
 }
 
 // Repo is a handle to a git repository, backed by whichever Backend was
@@ -52,3 +53,9 @@ func (r *Repo) Branches() ([]Branch, error) { return r.backend.Branches() }
 // Commits returns non-merge commits in revRange, or the entire history when
 // revRange is empty.
 func (r *Repo) Commits(revRange string) ([]Commit, error) { return r.backend.Commits(revRange) }
+
+// RecentCommits returns up to limit commits from the tip of HEAD, newest first,
+// merges included.
+func (r *Repo) RecentCommits(limit int) ([]RecentCommit, error) {
+	return r.backend.RecentCommits(limit)
+}

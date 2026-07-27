@@ -45,6 +45,24 @@ type Commit struct {
 	Files       []string // distinct paths touched (post-rename names)
 }
 
+// RecentCommit is one commit at the tip of the current branch, as shown in the
+// dashboard's recent-work panel. Unlike Commit (which feeds the aggregate and
+// excludes merges), this keeps merge commits: on a merge-based workflow the
+// merge commit *is* the merged pull request.
+//
+// PR is the pull/merge request number parsed out of the commit message when one
+// is discoverable (0 when not), so both squash-merge repos ("subject (#18)") and
+// merge-commit repos ("Merge pull request #18 from …") surface the same thing.
+type RecentCommit struct {
+	Hash    string    // full hash
+	Short   string    // abbreviated hash, as git chose to abbreviate it
+	Subject string    // first line, with a trailing "(#N)" folded into PR
+	Author  string    // mailmap-resolved author name
+	Time    time.Time // committer date: when it landed on this branch
+	PR      int       // pull/merge request number, 0 when none was found
+	Merge   bool      // whether this is a merge commit
+}
+
 // Vitals captures the current branch / working-tree state. These reflect "now"
 // and are intentionally not cached.
 type Vitals struct {
@@ -336,6 +354,127 @@ func parseLog(out string) []Commit {
 		commits = append(commits, c)
 	}
 	return commits
+}
+
+// RecentCommits returns up to limit commits from the tip of HEAD, newest first.
+// Merges are included (see RecentCommit). A limit <= 0 returns nothing without
+// touching git.
+func (r *shellRepo) RecentCommits(limit int) ([]RecentCommit, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	// %aN is mailmap-resolved, matching Commits. %P (parents) identifies merges;
+	// %b is last because it is the only field that may contain newlines.
+	format := "%x1e%H%x1f%h%x1f%aN%x1f%ct%x1f%P%x1f%s%x1f%b"
+	out, err := r.run("log", "-n", strconv.Itoa(limit), "--pretty=format:"+format)
+	if err != nil {
+		return nil, err
+	}
+	return parseRecentLog(out), nil
+}
+
+func parseRecentLog(out string) []RecentCommit {
+	var commits []RecentCommit
+	for _, rec := range strings.Split(out, recordSep) {
+		rec = strings.Trim(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		fields := strings.SplitN(rec, unitSep, 7)
+		if len(fields) < 7 {
+			continue
+		}
+		c := RecentCommit{
+			Hash:   fields[0],
+			Short:  fields[1],
+			Author: fields[2],
+			Merge:  len(strings.Fields(fields[4])) > 1,
+		}
+		c.Time, _ = parseUnix(fields[3])
+		c.Subject, c.PR = parseSubject(fields[5], fields[6])
+		commits = append(commits, c)
+	}
+	return commits
+}
+
+// parseSubject normalizes a commit subject for display and pulls out the
+// pull/merge request number when the message carries one. It covers the two
+// shapes a landed PR takes:
+//
+//   - squash/rebase merges, where the number is appended to the subject:
+//     "fix: make release publishing rerunnable (#18)" — the suffix is folded
+//     into PR so it isn't shown twice;
+//   - merge commits, where the subject is boilerplate
+//     ("Merge pull request #18 from user/branch") and the real title is the
+//     first line of the body.
+//
+// GitLab's "See merge request group/project!42" trailer is recognized too.
+// Anything else is returned unchanged with PR 0.
+func parseSubject(subject, body string) (string, int) {
+	subject = strings.TrimSpace(subject)
+
+	if rest, ok := strings.CutPrefix(subject, "Merge pull request #"); ok {
+		if n, _ := leadingInt(rest); n > 0 {
+			if title := firstLine(body); title != "" {
+				return title, n
+			}
+			return subject, n
+		}
+	}
+
+	// Trailing "(#18)" / "(!42)": strip it, since the number gets its own column.
+	if strings.HasSuffix(subject, ")") {
+		if i := strings.LastIndexByte(subject, '('); i >= 0 {
+			token := subject[i+1 : len(subject)-1]
+			if len(token) > 1 && (token[0] == '#' || token[0] == '!') {
+				if n, rest := leadingInt(token[1:]); n > 0 && rest == "" {
+					if trimmed := strings.TrimSpace(subject[:i]); trimmed != "" {
+						return trimmed, n
+					}
+				}
+			}
+		}
+	}
+
+	// GitLab merge commits carry the number in a body trailer instead.
+	for _, line := range strings.Split(body, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "See merge request "); ok {
+			if i := strings.LastIndexByte(rest, '!'); i >= 0 {
+				if n, _ := leadingInt(rest[i+1:]); n > 0 {
+					return subject, n
+				}
+			}
+		}
+	}
+
+	return subject, 0
+}
+
+// leadingInt reads the run of digits at the start of s, returning the value and
+// whatever follows it. A non-digit first byte yields 0.
+func leadingInt(s string) (int, string) {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, s
+	}
+	n, err := strconv.Atoi(s[:i])
+	if err != nil {
+		return 0, s
+	}
+	return n, s[i:]
+}
+
+// firstLine returns the first non-blank line of s, trimmed.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			return l
+		}
+	}
+	return ""
 }
 
 // parseNumstat parses one `<added>\t<deleted>\t<path>` line. Binary files use

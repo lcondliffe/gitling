@@ -21,6 +21,10 @@ import (
 
 const defaultDays = 14 * 7 // default range: last 14 weeks
 
+// defaultRecent is how many recent commits the dashboard lists by default:
+// enough to see what just landed without crowding out the other panels.
+const defaultRecent = 5
+
 // version is overwritten at build time via -ldflags "-X main.version=..." in
 // the release workflow. For `go install module@vX.Y.Z` builds (no ldflags), it
 // falls back to the version Go stamps into the build info.
@@ -57,6 +61,7 @@ func main() {
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
+	recent := flag.Int("recent", defaultRecent, "number of recent commits to list on the dashboard (0 hides the panel)")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
@@ -97,6 +102,9 @@ func main() {
 	if !explicit["color"] && cfg.Color != "" {
 		*color = cfg.Color
 	}
+	if !explicit["recent"] && cfg.Recent != nil {
+		*recent = *cfg.Recent
+	}
 
 	if *graph {
 		requested = append(requested, "graph")
@@ -124,6 +132,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	if *recent < 0 {
+		fmt.Fprintf(os.Stderr, "gitling: invalid --recent %d (must be 0 or more)\n", *recent)
+		os.Exit(2)
+	}
 	if err := validateBucket(*bucket); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
@@ -147,7 +159,7 @@ func main() {
 		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
 	}
 
-	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, aggregate.DateBasis(*dateBasis), *jsonOutput, width); err != nil {
+	if err := run(os.Stdout, *since, colorEnabled(*color), view, *bucket, aggregate.DateBasis(*dateBasis), *jsonOutput, *recent, width); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
 	}
@@ -169,6 +181,7 @@ Flags:
   --churn          show the full file churn drill-down
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
+  --recent <n>     recent commits listed on the dashboard, 0 hides them (default 5)
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
@@ -178,14 +191,14 @@ Flags:
                     or ~/.config/gitling/config.json; $GITLING_CONFIG overrides)
   --version        print version and exit
 
-Config file (optional, JSON) may set defaults for "since", "color", and
-"bucket"; command-line flags always override it. --no-color overrides both.
+Config file (optional, JSON) may set defaults for "since", "color", "bucket",
+and "recent"; command-line flags always override it. --no-color overrides both.
 
 Run inside a git repository.
 `)
 }
 
-func run(stdout io.Writer, since string, color bool, view, bucket string, dateBasis aggregate.DateBasis, jsonOutput bool, width int) error {
+func run(stdout io.Writer, since string, color bool, view, bucket string, dateBasis aggregate.DateBasis, jsonOutput bool, recent, width int) error {
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -223,7 +236,8 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 
 	// Only walk history when there are commits. An empty repo renders vitals
 	// plus empty panels.
-	if head, err := repo.Head(); err == nil {
+	head, headErr := repo.Head()
+	if headErr == nil {
 		revRange := "" // empty == full history
 		switch {
 		case ok && lastHash == head:
@@ -293,6 +307,16 @@ func run(stdout io.Writer, since string, color bool, view, bucket string, dateBa
 	m.Contributors = agg.TopContributors(sinceTime, now, 5)
 	m.HotFiles = agg.HotFiles(sinceTime, now, 3)
 	m.Growth = agg.BuildGrowth(now)
+	// Recent commits are live git state (and ignore --since: "what landed last"
+	// is only useful unfiltered), so they come straight from the log rather than
+	// the cached aggregate. Skipped on an empty repo, where there is no HEAD.
+	if recent > 0 && headErr == nil {
+		commits, err := repo.RecentCommits(recent)
+		if err != nil {
+			return err
+		}
+		m.Recent = commits
+	}
 	if jsonOutput {
 		return render.JSON(stdout, m, bucket, buckets)
 	}

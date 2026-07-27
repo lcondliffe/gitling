@@ -78,6 +78,15 @@ func goldenVitals() gitdata.Vitals {
 	}
 }
 
+func goldenRecent() []gitdata.RecentCommit {
+	return []gitdata.RecentCommit{
+		{Short: "2440dfe", Subject: "fix: make release publishing rerunnable", Author: "Ada Lovelace", Time: goldenNow.Add(-2 * time.Hour), PR: 18},
+		{Short: "f1264c7", Subject: "build(deps): bump golang.org/x/net", Author: "dependabot[bot]", Time: goldenNow.Add(-26 * time.Hour), PR: 17},
+		{Short: "045f117", Subject: "feat: add the widget", Author: "Alan Turing", Time: goldenNow.Add(-3 * 24 * time.Hour), PR: 11, Merge: true},
+		{Short: "6f5de0e", Subject: "chore: local commit, never went through a PR", Author: "Grace Hopper", Time: goldenNow.Add(-9 * 24 * time.Hour)},
+	}
+}
+
 func goldenModel() Model {
 	days := goldenDays()
 	return Model{
@@ -89,6 +98,7 @@ func goldenModel() Model {
 		Contributors: goldenContributors(),
 		Growth:       goldenGrowth(),
 		HotFiles:     goldenHotFiles(),
+		Recent:       goldenRecent(),
 		Now:          goldenNow,
 	}
 }
