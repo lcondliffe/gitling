@@ -14,6 +14,7 @@ type config struct {
 	Since  string `json:"since"`
 	Color  string `json:"color"`
 	Bucket string `json:"bucket"`
+	Layout string `json:"layout"`
 	// Recent is a pointer so that an explicit 0 (hide the recent panel) is
 	// distinguishable from the key being absent.
 	Recent *int `json:"recent"`

@@ -153,14 +153,14 @@ func TestLoadConfig(t *testing.T) {
 
 	// Valid config parses.
 	valid := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(valid, []byte(`{"since":"30d","color":"always","bucket":"week"}`), 0o644); err != nil {
+	if err := os.WriteFile(valid, []byte(`{"since":"30d","color":"always","bucket":"week","layout":"wide"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = loadConfig(valid)
 	if err != nil {
 		t.Fatalf("loadConfig(valid) error: %v", err)
 	}
-	if want := (config{Since: "30d", Color: "always", Bucket: "week"}); cfg != want {
+	if want := (config{Since: "30d", Color: "always", Bucket: "week", Layout: "wide"}); cfg != want {
 		t.Errorf("loadConfig(valid) = %+v, want %+v", cfg, want)
 	}
 
@@ -252,7 +252,7 @@ func TestConfigPath(t *testing.T) {
 func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month","recent":10}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month","recent":10,"layout":"stack"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := loadConfig(cfgPath)
@@ -265,6 +265,7 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	color := fs.String("color", "auto", "")
 	bucket := fs.String("bucket", "day", "")
 	recent := fs.Int("recent", defaultRecent, "")
+	layout := fs.String("layout", "auto", "")
 	if err := fs.Parse([]string{"--since", "7d"}); err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +285,9 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	if !explicit["recent"] && cfg.Recent != nil {
 		*recent = *cfg.Recent
 	}
+	if !explicit["layout"] && cfg.Layout != "" {
+		*layout = cfg.Layout
+	}
 
 	// --since was explicit: flag value wins over config.
 	if *since != "7d" {
@@ -298,5 +302,8 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	}
 	if *recent != 10 {
 		t.Errorf("recent = %d, want 10 (config should fill unset flag)", *recent)
+	}
+	if *layout != "stack" {
+		t.Errorf("layout = %q, want %q (config should fill unset flag)", *layout, "stack")
 	}
 }

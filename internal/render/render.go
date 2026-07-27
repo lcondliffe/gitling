@@ -35,6 +35,9 @@ type Model struct {
 	Recent       []gitdata.RecentCommit
 	Now          time.Time
 	Width        int
+	// Layout selects the dashboard shape: LayoutAuto (default), LayoutWide, or
+	// LayoutStack. The empty string means auto.
+	Layout string
 }
 
 // GraphModel is the focused activity drill-down view. Width: see Model.
@@ -103,37 +106,211 @@ func (p palette) c(code, s string) string {
 	return "\x1b[" + code + "m" + s + "\x1b[0m"
 }
 
-// Dashboard prints all four panels in order.
+// Layout modes for the dashboard, selected by Model.Layout.
+const (
+	LayoutAuto  = "auto"  // two columns when the terminal is wide enough
+	LayoutWide  = "wide"  // always two columns
+	LayoutStack = "stack" // always one column
+)
+
+// minGridWidth is the narrowest terminal that gets the two-column grid. Below
+// it, halving the width squeezes the contributor bars and file paths harder
+// than the saved vertical space is worth.
+const minGridWidth = 100
+
+// gridGutter is the blank columns between the two grid columns.
+const gridGutter = 1
+
+// ValidLayout reports whether mode is a layout Dashboard understands.
+func ValidLayout(mode string) bool {
+	switch mode {
+	case LayoutAuto, LayoutWide, LayoutStack, "":
+		return true
+	default:
+		return false
+	}
+}
+
+// Dashboard prints the panels as boxes, either stacked in one column or laid
+// out in a two-column grid — see Model.Layout.
 func Dashboard(w io.Writer, m Model, color bool) {
 	p := palette{on: color}
 
 	fmt.Fprintln(w)
-	p.header(w, "Repo", "")
+	for _, line := range p.dashboard(m) {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w)
-	p.vitals(w, m.Vitals)
+}
 
-	fmt.Fprintln(w)
-	p.header(w, "Activity", m.RangeLabel)
-	fmt.Fprintln(w)
-	p.heatmap(w, m)
+// useGrid decides between the grid and the stack. An unknown width (piped
+// output) always stacks: without a real terminal there is no width to divide,
+// and scripted consumers keep a stable shape.
+func useGrid(m Model) bool {
+	switch m.Layout {
+	case LayoutWide:
+		return true
+	case LayoutStack:
+		return false
+	default:
+		return m.Width >= minGridWidth
+	}
+}
 
-	if len(m.Recent) > 0 {
-		fmt.Fprintln(w)
-		p.header(w, "Recent", fmt.Sprintf("%d %s", len(m.Recent), plural(len(m.Recent), "commit", "commits")))
-		fmt.Fprintln(w)
-		p.recent(w, m.Recent, m.Now, m.Width)
+func (p palette) dashboard(m Model) []string {
+	if useGrid(m) {
+		return p.dashboardGrid(m)
+	}
+	return p.dashboardStack(m)
+}
+
+// dashboardGrid lays the panels out in two columns, flowing top-to-bottom
+// within each column so a short panel doesn't stretch its neighbour. Recent
+// spans the full width underneath: its rows are far wider than half a terminal
+// and would be truncated to uselessness in a column.
+func (p palette) dashboardGrid(m Model) []string {
+	// An unknown width (--layout=wide into a pipe) sizes each column to its own
+	// content instead, the way the stacked layout does.
+	natural := m.Width <= 0
+	leftW := (m.Width - gridGutter) / 2
+	rightW := m.Width - gridGutter - leftW
+	panelLeftW, panelRightW, panelFullW := leftW-2, rightW-2, m.Width-2
+	if natural {
+		panelLeftW, panelRightW, panelFullW = 0, 0, 0
 	}
 
-	fmt.Fprintln(w)
-	p.header(w, "Top contributors", "")
-	fmt.Fprintln(w)
-	p.contributors(w, m.Contributors, m.Width)
+	// Repo vitals and Recent span the full width, top and bottom: vitals is a
+	// single status line that reads worse broken up, and Recent's rows are far
+	// wider than half a terminal. The two columns hold the rest — hot files go
+	// under the heatmap rather than under growth, which balances the heights
+	// and keeps paths in the narrower column where they elide gracefully.
+	vitals := p.vitalsLines(m, panelFullW)
+	recent := p.recentLines(m, panelFullW)
+	heatmap := p.heatmapLines(m, panelLeftW)
+	hot := p.hotFileLines(m, panelLeftW)
+	contributors := p.contributorLines(m, panelRightW)
+	growth := p.growthLines(m, panelRightW)
 
-	fmt.Fprintln(w)
-	p.header(w, "Codebase growth", "6mo")
-	fmt.Fprintln(w)
-	p.growth(w, m.Growth, m.HotFiles, m.Width)
-	fmt.Fprintln(w)
+	fullW := m.Width - 2
+	if natural {
+		// +1 keeps content off the border, +2 covers the border itself.
+		leftW = contentWidth(heatmap, hot) + 3
+		rightW = contentWidth(contributors, growth) + 3
+		fullW = max(contentWidth(vitals, recent)+1, leftW+gridGutter+rightW-2)
+	}
+
+	leftBoxes := [][]string{
+		p.box(titleWith("Activity", m.RangeLabel), heatmap, leftW-2),
+	}
+	if len(hot) > 0 {
+		leftBoxes = append(leftBoxes, p.box(titleWith("Hot files", ""), hot, leftW-2))
+	}
+
+	right := stackBoxes(
+		p.box(titleWith("Top contributors", ""), contributors, rightW-2),
+		p.box(titleWith("Codebase growth", "6mo"), growth, rightW-2),
+	)
+
+	out := p.box(titleWith("Repo", ""), vitals, fullW)
+	out = append(out, sideBySide(stackBoxes(leftBoxes...), right, leftW, gridGutter)...)
+	if len(recent) > 0 {
+		out = append(out, p.box(recentTitle(m), recent, fullW)...)
+	}
+	return out
+}
+
+// dashboardStack lays the panels out in a single column of full-width boxes.
+// When the width is unknown, every box is sized to the widest content line so
+// the column still has a straight right edge.
+func (p palette) dashboardStack(m Model) []string {
+	innerW := m.Width - 2
+	panelW := innerW
+	if m.Width <= 0 {
+		panelW = 0 // unbounded: panels render at their natural width
+	}
+
+	vitals := p.vitalsLines(m, panelW)
+	heatmap := p.heatmapLines(m, panelW)
+	recent := p.recentLines(m, panelW)
+	contributors := p.contributorLines(m, panelW)
+	growth := p.growthLines(m, panelW)
+	hot := p.hotFileLines(m, panelW)
+
+	if m.Width <= 0 {
+		// One trailing column keeps content off the right border.
+		innerW = contentWidth(vitals, heatmap, recent, contributors, growth, hot) + 1
+	}
+
+	boxes := [][]string{
+		p.box(titleWith("Repo", ""), vitals, innerW),
+		p.box(titleWith("Activity", m.RangeLabel), heatmap, innerW),
+	}
+	if len(recent) > 0 {
+		boxes = append(boxes, p.box(recentTitle(m), recent, innerW))
+	}
+	boxes = append(boxes,
+		p.box(titleWith("Top contributors", ""), contributors, innerW),
+		p.box(titleWith("Codebase growth", "6mo"), growth, innerW),
+	)
+	if len(hot) > 0 {
+		boxes = append(boxes, p.box(titleWith("Hot files", ""), hot, innerW))
+	}
+	return stackBoxes(boxes...)
+}
+
+// titleWith builds a box title: the label uppercased as section headers always
+// were, with its qualifier left in sentence case, e.g. "ACTIVITY · last 14 weeks".
+func titleWith(label, suffix string) string {
+	label = strings.ToUpper(label)
+	if suffix == "" {
+		return label
+	}
+	return label + " · " + suffix
+}
+
+func recentTitle(m Model) string {
+	return titleWith("Recent", fmt.Sprintf("%d %s", len(m.Recent), plural(len(m.Recent), "commit", "commits")))
+}
+
+// The *Lines helpers render one panel's body (no header, no surrounding blank
+// lines) at the given width, ready to be framed by box.
+func (p palette) vitalsLines(m Model, width int) []string {
+	return capture(func(w io.Writer) { p.vitals(w, m.Vitals, width) })
+}
+
+func (p palette) heatmapLines(m Model, width int) []string {
+	m.Width = width
+	return capture(func(w io.Writer) { p.heatmap(w, m) })
+}
+
+func (p palette) contributorLines(m Model, width int) []string {
+	return capture(func(w io.Writer) { p.contributors(w, m.Contributors, width) })
+}
+
+func (p palette) growthLines(m Model, width int) []string {
+	return capture(func(w io.Writer) { p.growth(w, m.Growth) })
+}
+
+func (p palette) hotFileLines(m Model, width int) []string {
+	return capture(func(w io.Writer) { p.hotFiles(w, m.HotFiles, width) })
+}
+
+func (p palette) recentLines(m Model, width int) []string {
+	if len(m.Recent) == 0 {
+		return nil
+	}
+	return capture(func(w io.Writer) { p.recent(w, m.Recent, m.Now, width) })
+}
+
+// capture collects what a panel renderer writes, one string per line.
+func capture(fn func(io.Writer)) []string {
+	var buf strings.Builder
+	fn(&buf)
+	s := strings.TrimRight(buf.String(), "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 // Graph prints a focused activity drill-down: the familiar heatmap, a taller
@@ -386,7 +563,10 @@ func (p palette) header(w io.Writer, label, suffix string) {
 	fmt.Fprintln(w, p.c(cLabel, s))
 }
 
-func (p palette) vitals(w io.Writer, v gitdata.Vitals) {
+// vitals prints the one-line repo status bar. When the parts don't fit the
+// available width they wrap onto further lines rather than being clipped: every
+// field here is a distinct fact, so losing the tail loses information.
+func (p palette) vitals(w io.Writer, v gitdata.Vitals, width int) {
 	dotColor := cAccent
 	if v.DirtyFiles > 0 {
 		dotColor = cAmber
@@ -401,7 +581,39 @@ func (p palette) vitals(w io.Writer, v gitdata.Vitals) {
 		p.c(cLabel, fmt.Sprintf("%d %s", v.StashCount, plural(v.StashCount, "stash", "stashes"))),
 		p.c(cLabel, fmt.Sprintf("%d %s", v.BranchCount, plural(v.BranchCount, "branch", "branches"))),
 	)
-	fmt.Fprintln(w, "  "+strings.Join(parts, "   "))
+	for _, line := range packParts(parts, width-2, 3) {
+		fmt.Fprintln(w, "  "+line)
+	}
+}
+
+// packParts greedily groups parts into lines at most width visible columns
+// wide, joined by sep spaces. A width of 0 or less means unbounded: everything
+// goes on one line, as it always did when the terminal width is unknown.
+func packParts(parts []string, width, sep int) []string {
+	gap := strings.Repeat(" ", sep)
+	if width <= 0 {
+		return []string{strings.Join(parts, gap)}
+	}
+	var lines []string
+	var cur string
+	curLen := 0
+	for _, part := range parts {
+		n := visibleLen(part)
+		switch {
+		case cur == "":
+			cur, curLen = part, n
+		case curLen+sep+n <= width:
+			cur += gap + part
+			curLen += sep + n
+		default:
+			lines = append(lines, cur)
+			cur, curLen = part, n
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
 }
 
 type cell struct {
@@ -461,7 +673,6 @@ func (p palette) heatmap(w io.Writer, m Model) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
-	fmt.Fprintln(w)
 	summary := fmt.Sprintf("%d commits in range · streak: %d days", m.TotalCommits, m.Streak)
 	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
 }
@@ -517,8 +728,8 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int
 			countW = n
 		}
 	}
-	if nameW > 16 {
-		nameW = 16
+	if maxName := maxNameWidth(width, countW); nameW > maxName {
+		nameW = maxName
 	}
 	// "  " + name + "   " + bar + "   " + count precedes the newline.
 	barW := barWidthFor(width, 2+nameW+3+3+countW)
@@ -625,7 +836,26 @@ func prLabel(c gitdata.RecentCommit) string {
 	return "#" + strconv.Itoa(c.PR)
 }
 
-func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChurn, width int) {
+// maxNameWidth is how much of a contributor's name may be shown. Names are
+// capped so a single long one can't push the bars off the line, but the cap
+// grows to use whatever a wide panel has spare after a full-length bar — a
+// truncated "Margaret Hamilt…" beside 20 empty columns helps nobody.
+//
+// An unknown width (piped output) keeps the fixed cap, so redirected output
+// stays stable regardless of who has committed.
+func maxNameWidth(width, countW int) int {
+	const base = 16
+	if width <= 0 {
+		return base
+	}
+	// "  " + name + "   " + bar + "   " + count.
+	if avail := width - 2 - 3 - contribBarW - 3 - countW; avail > base {
+		return avail
+	}
+	return base
+}
+
+func (p palette) growth(w io.Writer, g aggregate.Growth) {
 	var pct string
 	switch {
 	case !g.HasPct:
@@ -640,29 +870,30 @@ func (p palette) growth(w io.Writer, g aggregate.Growth, hot []aggregate.FileChu
 	fmt.Fprintf(w, "  %s LOC  %s\n", p.c(cBright, humanInt(g.TotalLOC)), pct)
 
 	if chart := p.growthChart(g.Spark, growthChartHeight); len(chart) > 0 {
-		fmt.Fprintln(w)
 		for _, line := range chart {
 			fmt.Fprintln(w, "  "+line)
 		}
 	}
+}
 
-	if len(hot) > 0 {
-		countW := 0
-		for _, f := range hot {
-			if n := len(strconv.Itoa(f.Commits)); n > countW {
-				countW = n
-			}
+// hotFiles lists the files with the most commits against them. Counts lead so
+// they stay aligned and the (often long) paths can be elided from the middle
+// without disturbing the column.
+func (p palette) hotFiles(w io.Writer, hot []aggregate.FileChurn, width int) {
+	if len(hot) == 0 {
+		return
+	}
+	countW := 0
+	for _, f := range hot {
+		if n := len(strconv.Itoa(f.Commits)); n > countW {
+			countW = n
 		}
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "  "+p.c(cLabel, "hot files"))
-		// "    " + count + "   " precedes the path.
-		pathW := pathBudget(width, 4+countW+3)
-		for _, f := range hot {
-			// Count-first keeps the numbers aligned and the (long) paths from
-			// wrapping mid-string the way an inline list does.
-			count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
-			fmt.Fprintf(w, "    %s   %s\n", count, elidePath(f.Path, pathW))
-		}
+	}
+	// "  " + count + "   " precedes the path.
+	pathW := pathBudget(width, 2+countW+3)
+	for _, f := range hot {
+		count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
+		fmt.Fprintf(w, "  %s   %s\n", count, elidePath(f.Path, pathW))
 	}
 }
 
