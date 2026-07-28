@@ -29,6 +29,13 @@ func TestRuneWidth(t *testing.T) {
 		{"emoji", '🎉', 2},
 		{"emoji bug", '🐛', 2},
 		{"combining acute", '́', 0},
+		// Nonspacing marks come from unicode.Mn rather than a hand-listed
+		// table, so scripts with scattered mark ranges are covered too.
+		{"hebrew point rafe", 'ֿ', 0},
+		{"hebrew point shin dot", 'ׁ', 0},
+		{"hebrew point qamats qatan", 'ׇ', 0},
+		{"devanagari nukta", '़', 0},
+		{"thai sara i", 'ิ', 0},
 		{"zero-width joiner", '‍', 0},
 		{"variation selector 16", '️', 0},
 		{"skin tone modifier", '\U0001F3FB', 0},
@@ -52,6 +59,14 @@ func TestCellLen(t *testing.T) {
 		{"feat: 日本語 🎉", 6 + 6 + 1 + 2},
 		{"é", 1},                   // e + combining acute renders as one cell
 		{"\U0001F44D\U0001F3FB", 2}, // thumbs up + skin tone is one glyph
+		// Emoji presentation sequences: a text-default base plus U+FE0F is
+		// drawn as a two-cell emoji, not the one cell the base scores alone.
+		{"❤️", 2},          // heart
+		{"⚠️", 2},          // warning sign
+		{"✔️", 2},          // check mark
+		{"❤", 1},           // bare base stays text presentation
+		{"a❤️b", 4},        // sequence mid-string
+		{"\U0001F389️", 2}, // VS16 after an already-wide emoji
 	}
 	for _, tc := range cases {
 		if got := cellLen(tc.in); got != tc.want {
@@ -66,7 +81,7 @@ func TestWidthTablesSortedAndDisjoint(t *testing.T) {
 	for _, tbl := range []struct {
 		name  string
 		table [][2]rune
-	}{{"zeroWidth", zeroWidth}, {"wide", wide}} {
+	}{{"zeroWidthExtra", zeroWidthExtra}, {"wide", wide}} {
 		for i, r := range tbl.table {
 			if r[0] > r[1] {
 				t.Errorf("%s[%d] = %U-%U: range is inverted", tbl.name, i, r[0], r[1])
@@ -111,10 +126,17 @@ func TestTruncateWideRunes(t *testing.T) {
 		{"日本語のコミット", 7},
 		{"日本語のコミット", 4},
 		{"mixed 中文 text", 9},
+		// A wide rune must not be emitted into a one-cell budget, and a
+		// non-positive budget must not panic.
+		{"日", 1},
+		{"日本語", 1},
+		{"abc", 1},
+		{"日", 0},
+		{"日", -1},
 	}
 	for _, tc := range cases {
 		got := truncate(tc.in, tc.max)
-		if w := cellLen(got); w > tc.max {
+		if w, limit := cellLen(got), max(tc.max, 0); w > limit {
 			t.Errorf("truncate(%q, %d) = %q: width %d exceeds max", tc.in, tc.max, got, w)
 		}
 	}
