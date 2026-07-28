@@ -580,7 +580,7 @@ func TestElidePathKeepsFilenameVisible(t *testing.T) {
 	long := "terraform/modules/networking/subnets/private/us-east-1a/main.tf"
 	got := elidePath(long, 24)
 	if cellLen(got) > 24 {
-		t.Fatalf("elidePath result too long: %q (%d runes)", got, cellLen(got))
+		t.Fatalf("elidePath result too long: %q (%d cells)", got, cellLen(got))
 	}
 	if !strings.HasSuffix(got, "main.tf") {
 		t.Fatalf("elidePath should keep the filename visible: %q", got)
@@ -689,7 +689,7 @@ func TestHeatmapCapsColumnsAndKeepsMostRecent(t *testing.T) {
 		}
 		gotCols := (cellLen(l) + 1) / 2 // indent already stripped by TrimRight on empties
 		if gotCols > maxCols+1 {        // +1 slack: indent isn't a full column
-			t.Fatalf("heatmap row %d has %d runes, exceeds cap of %d columns:\n%s", i, cellLen(l), maxCols, out)
+			t.Fatalf("heatmap row %d has %d cells, exceeds cap of %d columns:\n%s", i, cellLen(l), maxCols, out)
 		}
 	}
 	// Today's glyph ('□' when off, since it's always drawn regardless of

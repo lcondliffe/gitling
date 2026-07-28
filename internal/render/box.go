@@ -1,9 +1,6 @@
 package render
 
-import (
-	"strings"
-	"unicode/utf8"
-)
+import "strings"
 
 // Box drawing for the dashboard grid.
 //
@@ -32,9 +29,9 @@ func visibleLen(s string) int {
 			i = skipEscape(s, i)
 			continue
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		i += size
-		n += runeWidth(r)
+		w, next := stepCell(s, i)
+		n += w
+		i = next
 	}
 	return n
 }
@@ -78,16 +75,16 @@ func clipVisible(s string, max int) string {
 			i = j
 			continue
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		// Leave room for the ellipsis, which is one cell. A double-width rune
-		// that would straddle the cut is dropped whole, so the result can come
-		// in a cell short; callers pad to width.
-		if seen+runeWidth(r) > max-1 {
+		// Leave room for the ellipsis, which is one cell. A double-width
+		// cluster that would straddle the cut is dropped whole, so the result
+		// can come in a cell short; callers pad to width.
+		w, next := stepCell(s, i)
+		if seen+w > max-1 {
 			break
 		}
-		b.WriteRune(r)
-		i += size
-		seen += runeWidth(r)
+		b.WriteString(s[i:next])
+		seen += w
+		i = next
 	}
 	b.WriteString(ellipsis)
 	if colored {

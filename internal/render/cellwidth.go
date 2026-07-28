@@ -1,6 +1,10 @@
 package render
 
-import "sort"
+import (
+	"sort"
+	"unicode"
+	"unicode/utf8"
+)
 
 // Terminal cell widths for the characters gitling prints.
 //
@@ -23,32 +27,20 @@ import "sort"
 // only multi-emoji ZWJ sequences overcount. They are rare in commit metadata and
 // the failure is a too-narrow row rather than a broken border.
 
-// zeroWidth holds characters that occupy no cell: combining marks, Hangul
-// conjoining medial/final jamo, format controls, variation selectors, and emoji
-// modifiers (which a terminal composes onto the preceding base character).
-var zeroWidth = [][2]rune{
-	{0x0300, 0x036F},   // combining diacritical marks
-	{0x0483, 0x0489},   // Cyrillic combining
-	{0x0591, 0x05BD},   // Hebrew points
-	{0x0610, 0x061A},   // Arabic marks
-	{0x064B, 0x065F},   // Arabic diacritics
-	{0x0670, 0x0670},   // Arabic superscript alef
-	{0x06D6, 0x06DC},   // Arabic small high marks
-	{0x0900, 0x0903},   // Devanagari signs
-	{0x093A, 0x094F},   // Devanagari vowel signs
-	{0x0951, 0x0957},   // Devanagari stress signs
-	{0x1160, 0x11FF},   // Hangul conjoining jungseong + jongseong
-	{0x1AB0, 0x1AFF},   // combining diacritical marks extended
-	{0x1DC0, 0x1DFF},   // combining diacritical marks supplement
-	{0x200B, 0x200F},   // zero-width space .. RTL mark (incl. ZWJ at 200D)
-	{0x2028, 0x202E},   // line/paragraph separators, bidi overrides
-	{0x2060, 0x2064},   // word joiner, invisible operators
-	{0x20D0, 0x20F0},   // combining marks for symbols
-	{0xFE00, 0xFE0F},   // variation selectors 1-16
-	{0xFE20, 0xFE2F},   // combining half marks
-	{0xFEFF, 0xFEFF},   // zero-width no-break space (BOM)
-	{0x1F3FB, 0x1F3FF}, // emoji skin-tone modifiers
-	{0xE0100, 0xE01EF}, // variation selectors supplement
+// zeroWidthExtra holds zero-width characters outside the Unicode nonspacing
+// categories that isZeroWidth already covers.
+var zeroWidthExtra = [][2]rune{
+	{0x1160, 0x11FF},   // Hangul conjoining jungseong + jongseong (category Lo)
+	{0x1F3FB, 0x1F3FF}, // emoji skin-tone modifiers (category Sk), composed onto the base
+}
+
+// isZeroWidth reports whether r occupies no cell. The nonspacing marks (Mn),
+// enclosing marks (Me), and format characters (Cf — zero-width space, ZWJ,
+// variation selectors, bidi controls) come from the stdlib's Unicode tables
+// rather than a hand-maintained list, so scripts gitling never anticipated are
+// measured correctly and the data stays current with the Go release.
+func isZeroWidth(r rune) bool {
+	return unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf) || inRanges(zeroWidthExtra, r)
 }
 
 // wide holds characters that occupy two cells: East Asian Width Wide (W) and
@@ -177,13 +169,39 @@ func runeWidth(r rune) int {
 	if r < 0x0300 { // fast path: ASCII and Latin-1 are all single-width
 		return 1
 	}
-	if inRanges(zeroWidth, r) {
+	if isZeroWidth(r) {
 		return 0
 	}
 	if inRanges(wide, r) {
 		return 2
 	}
 	return 1
+}
+
+// variationSelector16 requests emoji presentation for the preceding character.
+const variationSelector16 = 0xFE0F
+
+// stepCell measures the display cluster starting at byte offset i in s,
+// returning its width in cells and the offset just past it. It is the single
+// stepper every width helper in this package walks with, so they cannot
+// disagree about where one cluster ends and the next begins.
+//
+// Beyond the per-rune width it handles emoji presentation sequences: a
+// text-default character followed by U+FE0F (❤️, ⚠️, ✔️ — common enough in commit
+// subjects) is drawn by the terminal as a two-cell emoji, not the one cell its
+// base rune would score alone.
+func stepCell(s string, i int) (w, next int) {
+	r, size := utf8.DecodeRuneInString(s[i:])
+	w, next = runeWidth(r), i+size
+	if next < len(s) {
+		if vs, vsSize := utf8.DecodeRuneInString(s[next:]); vs == variationSelector16 {
+			next += vsSize
+			if w == 1 {
+				w = 2 // emoji presentation: the pair occupies two cells
+			}
+		}
+	}
+	return w, next
 }
 
 // inRanges reports whether r falls inside one of the sorted, non-overlapping
@@ -199,8 +217,10 @@ func inRanges(table [][2]rune, r rune) bool {
 // already-colored strings use visibleLen.
 func cellLen(s string) int {
 	n := 0
-	for _, r := range s {
-		n += runeWidth(r)
+	for i := 0; i < len(s); {
+		w, next := stepCell(s, i)
+		n += w
+		i = next
 	}
 	return n
 }

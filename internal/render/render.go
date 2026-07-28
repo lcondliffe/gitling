@@ -1024,25 +1024,18 @@ func plural(n int, one, many string) string {
 }
 
 // truncate shortens s to at most max terminal cells, marking the cut with an
-// ellipsis. Like clipVisible it drops a double-width rune whole rather than
-// splitting it, so the result may be one cell short of max.
+// ellipsis. Like clipVisible it drops a double-width cluster whole rather than
+// splitting it, so the result may be one cell short of max. A max of 1 yields
+// the bare ellipsis (a wide rune would not fit in the cell), and a
+// non-positive max yields the empty string.
 func truncate(s string, max int) string {
 	if cellLen(s) <= max {
 		return s
 	}
-	if max <= 1 {
-		return string([]rune(s)[:max])
+	if max <= 0 {
+		return ""
 	}
-	var b strings.Builder
-	w := 0
-	for _, r := range s {
-		if w+runeWidth(r) > max-1 {
-			break
-		}
-		b.WriteRune(r)
-		w += runeWidth(r)
-	}
-	return b.String() + "…"
+	return head(s, max-1) + "…"
 }
 
 // barWidthFor scales a fill-bar to fit within width, given overhead columns
@@ -1113,16 +1106,16 @@ func elidePath(path string, maxLen int) string {
 }
 
 // head returns the longest prefix of s fitting in w terminal cells. A
-// double-width rune that would straddle the limit is dropped whole.
+// double-width cluster that would straddle the limit is dropped whole.
 func head(s string, w int) string {
-	var b strings.Builder
 	n := 0
-	for _, r := range s {
-		if n+runeWidth(r) > w {
-			break
+	for i := 0; i < len(s); {
+		cw, next := stepCell(s, i)
+		if n+cw > w {
+			return s[:i]
 		}
-		b.WriteRune(r)
-		n += runeWidth(r)
+		n += cw
+		i = next
 	}
-	return b.String()
+	return s
 }
