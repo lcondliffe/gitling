@@ -485,8 +485,8 @@ func TestRecentTruncatesSubjectToWidth(t *testing.T) {
 
 	for _, line := range strings.Split(buf.String(), "\n") {
 		if strings.Contains(line, "abc123d") {
-			if runeLen(line) > 60 {
-				t.Errorf("recent row is %d wide, want <= 60:\n%q", runeLen(line), line)
+			if cellLen(line) > 60 {
+				t.Errorf("recent row is %d wide, want <= 60:\n%q", cellLen(line), line)
 			}
 			if !strings.Contains(line, "…") {
 				t.Errorf("long subject should be elided: %q", line)
@@ -579,8 +579,8 @@ func TestElidePathShortPathUnchanged(t *testing.T) {
 func TestElidePathKeepsFilenameVisible(t *testing.T) {
 	long := "terraform/modules/networking/subnets/private/us-east-1a/main.tf"
 	got := elidePath(long, 24)
-	if runeLen(got) > 24 {
-		t.Fatalf("elidePath result too long: %q (%d runes)", got, runeLen(got))
+	if cellLen(got) > 24 {
+		t.Fatalf("elidePath result too long: %q (%d runes)", got, cellLen(got))
 	}
 	if !strings.HasSuffix(got, "main.tf") {
 		t.Fatalf("elidePath should keep the filename visible: %q", got)
@@ -594,7 +594,7 @@ func TestElidePathVeryNarrowTruncatesFilename(t *testing.T) {
 	long := "terraform/modules/networking/subnets/private/us-east-1a/main.tf"
 	for _, maxLen := range []int{1, 2, 4} {
 		got := elidePath(long, maxLen)
-		if runeLen(got) > maxLen {
+		if cellLen(got) > maxLen {
 			t.Fatalf("elidePath(_, %d) = %q, exceeds max", maxLen, got)
 		}
 	}
@@ -648,7 +648,7 @@ func TestHeatmapUnknownWidthShowsAllColumns(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	var widest int
 	for _, l := range lines {
-		if n := runeLen(l); n > widest {
+		if n := cellLen(l); n > widest {
 			widest = n
 		}
 	}
@@ -687,9 +687,9 @@ func TestHeatmapCapsColumnsAndKeepsMostRecent(t *testing.T) {
 		if i >= 7 { // only the 7 grid rows are column-bounded
 			break
 		}
-		gotCols := (runeLen(l) + 1) / 2 // indent already stripped by TrimRight on empties
+		gotCols := (cellLen(l) + 1) / 2 // indent already stripped by TrimRight on empties
 		if gotCols > maxCols+1 {        // +1 slack: indent isn't a full column
-			t.Fatalf("heatmap row %d has %d runes, exceeds cap of %d columns:\n%s", i, runeLen(l), maxCols, out)
+			t.Fatalf("heatmap row %d has %d runes, exceeds cap of %d columns:\n%s", i, cellLen(l), maxCols, out)
 		}
 	}
 	// Today's glyph ('□' when off, since it's always drawn regardless of
