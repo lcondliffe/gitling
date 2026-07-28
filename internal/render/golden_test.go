@@ -170,6 +170,31 @@ func goldenBranchesModel() BranchesModel {
 	}
 }
 
+// goldenWideCharModel is goldenModel with double-width content in every panel
+// that renders repository data: CJK author names, an emoji commit subject, and
+// a path with fullwidth characters. Panels are sized in terminal cells, so this
+// is what catches a regression back to rune counting (see cellwidth.go).
+func goldenWideCharModel() Model {
+	m := goldenModel()
+	m.Contributors = []aggregate.Contributor{
+		{Email: "yamada@example.com", Name: "山田太郎", Commits: 42},
+		{Email: "ada@example.com", Name: "Ada Lovelace", Commits: 27},
+		{Email: "kim@example.com", Name: "김철수", Commits: 15},
+		{Email: "zhang@example.com", Name: "张三 (Zhang San)", Commits: 9},
+	}
+	m.Recent = []gitdata.RecentCommit{
+		{Short: "2440dfe", Subject: "feat: 日本語のコミット 🎉", Author: "山田太郎", Time: goldenNow.Add(-2 * time.Hour), PR: 18},
+		{Short: "f1264c7", Subject: "fix: mixed 中文 and ASCII 🐛", Author: "Ada Lovelace", Time: goldenNow.Add(-26 * time.Hour), PR: 17},
+		{Short: "045f117", Subject: "chore: plain ascii subject", Author: "김철수", Time: goldenNow.Add(-3 * 24 * time.Hour)},
+	}
+	m.HotFiles = []aggregate.FileChurn{
+		{Path: "internal/render/render.go", Commits: 31},
+		{Path: "docs/日本語/設計.md", Commits: 18},
+		{Path: "go.mod", Commits: 2},
+	}
+	return m
+}
+
 // checkGolden renders got against the golden file at testdata/name, updating
 // it in place when -update is passed.
 func checkGolden(t *testing.T, name string, got []byte) {
@@ -216,6 +241,25 @@ func TestGoldenDashboardNarrow(t *testing.T) {
 	var buf bytes.Buffer
 	Dashboard(&buf, m, false)
 	checkGolden(t, "dashboard-narrow.golden.txt", buf.Bytes())
+}
+
+// Double-width content in the two-column grid: the layout that fails most
+// visibly when width is miscounted, since a misjudged left column shifts the
+// entire right column.
+func TestGoldenDashboardWideChars(t *testing.T) {
+	m := goldenWideCharModel()
+	m.Width = 120
+	var buf bytes.Buffer
+	Dashboard(&buf, m, false)
+	checkGolden(t, "dashboard-widechars.golden.txt", buf.Bytes())
+}
+
+func TestGoldenDashboardWideCharsStacked(t *testing.T) {
+	m := goldenWideCharModel()
+	m.Width = 70
+	var buf bytes.Buffer
+	Dashboard(&buf, m, false)
+	checkGolden(t, "dashboard-widechars-narrow.golden.txt", buf.Bytes())
 }
 
 func TestGoldenGraph(t *testing.T) {
