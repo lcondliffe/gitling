@@ -163,13 +163,13 @@ func (p palette) tidySummary(w io.Writer, m TidyModel) {
 	forced := m.Plan.Forced()
 
 	if !m.Applied {
-		parts := fmt.Sprintf("%d %s to delete", n, plural(n, "branch", "branches"))
+		parts := fmt.Sprintf("%d %s would be deleted", n, plural(n, "branch", "branches"))
 		if forced > 0 {
 			parts += fmt.Sprintf(", %d needing -D", forced)
 		}
 		p.tidyLine(w, m.Width, cLabel, parts)
 		if !m.Confirming {
-			p.tidyLine(w, m.Width, cAmber, "dry run — pass --apply to delete")
+			p.tidyLine(w, m.Width, cAmber, "nothing has been deleted — re-run with --apply to delete them")
 		}
 		return
 	}

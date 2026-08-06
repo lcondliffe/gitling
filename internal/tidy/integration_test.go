@@ -11,14 +11,8 @@ import (
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
-// End-to-end tests over a real repository: git → gitdata.Branches → Classify.
-// The unit tests in tidy_test.go prove Classify's rules against hand-built
-// branch lists; these prove the rules still hold when the branch list came
-// from git rather than from a literal, which is where a mismatch between what
-// gitdata reports and what Classify expects would show up.
-//
-// Gated the same way as the gitdata integration tests: skip when git is
-// missing rather than fail.
+// End-to-end over a real repository: git → gitdata.Branches → Classify.
+// Skips when git is missing, like the gitdata integration tests.
 
 func requireGit(t *testing.T) {
 	t.Helper()
@@ -68,9 +62,7 @@ func commit(t *testing.T, dir, name, content, msg string, when time.Time) {
 	gitAt(t, dir, when, "commit", "-q", "-m", msg)
 }
 
-// realRepo builds one repository containing every shape tidy classifies:
-// merged, squash-merged-and-gone, stale, protected, and the checked-out branch.
-// Returns the opened repo and the local path.
+// realRepo builds a repository containing every shape tidy classifies.
 func realRepo(t *testing.T) (*gitdata.Repo, string) {
 	t.Helper()
 	requireGit(t)
@@ -103,11 +95,8 @@ func realRepo(t *testing.T) (*gitdata.Repo, string) {
 	git(t, local, "merge", "-q", "--squash", "squashed-work")
 	git(t, local, "commit", "-q", "-m", "squashed work (#1)")
 
-	// Publish main. This matters more than it looks: "merged" is measured
-	// against the *remote* default branch (see TestMergedIsMeasuredAgainstThe
-	// RemoteDefaultBranch), so an unpushed main would leave merged-work
-	// looking unmerged and this fixture would quietly stop testing the merged
-	// path at all.
+	// "Merged" is measured against the remote default branch, so an unpushed
+	// main would leave merged-work looking unmerged.
 	git(t, local, "push", "-q", "origin", "main")
 	git(t, remote, "branch", "-D", "squashed-work")
 
@@ -162,9 +151,7 @@ func candidateByName(p Plan, name string) (Candidate, bool) {
 	return Candidate{}, false
 }
 
-// TestRealRepoClassification checks the reason and force flag assigned to each
-// real branch shape. The merged/gone distinction is the one that decides -d
-// versus -D, so it is asserted per branch rather than in aggregate.
+// Reason and force flag per real branch shape.
 func TestRealRepoClassification(t *testing.T) {
 	repo, _ := realRepo(t)
 	plan := classifyReal(t, repo, Options{
@@ -209,12 +196,8 @@ func TestRealRepoClassification(t *testing.T) {
 	}
 }
 
-// TestRealRepoPlanIsExecutable is the property that ties the two halves of the
-// feature together: for every candidate, the force flag Classify chose is the
-// one git actually requires. If Classify ever says "-d is enough" for a branch
-// git will not drop unforced, tidy reports a failure it could have avoided; if
-// it needlessly says -D, it has thrown away git's safety net. Executing the
-// plan against a real repository is the only way to check that.
+// For every candidate, the force flag Classify chose must be the one git
+// actually requires — checked by executing the plan for real.
 func TestRealRepoPlanIsExecutable(t *testing.T) {
 	repo, local := realRepo(t)
 	plan := classifyReal(t, repo, Options{
@@ -248,8 +231,7 @@ func TestRealRepoPlanIsExecutable(t *testing.T) {
 	}
 }
 
-// TestRealRepoUnforcedDeleteMatchesGit checks the claim from the other side:
-// a candidate marked Force=false must be one git accepts with a plain -d.
+// A candidate marked Force=false must be one git accepts with plain -d.
 func TestRealRepoUnforcedDeleteMatchesGit(t *testing.T) {
 	repo, _ := realRepo(t)
 	plan := classifyReal(t, repo, Options{
@@ -273,20 +255,9 @@ func TestRealRepoUnforcedDeleteMatchesGit(t *testing.T) {
 	}
 }
 
-// TestMergedIsMeasuredAgainstTheRemoteDefaultBranch pins a subtlety with real
-// consequences for which branches get -D.
-//
-// Once anything has fetched, refs/remotes/origin/HEAD is set and
-// DefaultBranch() resolves to "origin/main" rather than the local "main" — and
-// tidy fetches by default, so this is the normal case, not the edge case.
-// "Merged" therefore means "merged into the published main", not "merged into
-// your local main".
-//
-// The visible effect: merge a branch locally, don't push, and tidy will not
-// call it merged. It falls through to gone or stale and is deleted with -D
-// instead of -d. That is the safer direction to be wrong in — the work is only
-// on this machine, so git's merge check refusing is the correct outcome — but
-// it is surprising enough to be worth a test that says so out loud.
+// After any fetch, DefaultBranch() resolves to origin/main, so "merged" means
+// merged into the published main. A branch merged locally but never pushed
+// gets -D rather than -d — safe, but surprising enough to pin.
 func TestMergedIsMeasuredAgainstTheRemoteDefaultBranch(t *testing.T) {
 	requireGit(t)
 
@@ -350,8 +321,7 @@ func TestMergedIsMeasuredAgainstTheRemoteDefaultBranch(t *testing.T) {
 	}
 }
 
-// TestRealRepoStaleIsAdditive is the additive contract measured end to end on a
-// real repository, complementing the flag-level test in the command package.
+// The additive --stale contract, end to end.
 func TestRealRepoStaleIsAdditive(t *testing.T) {
 	repo, _ := realRepo(t)
 

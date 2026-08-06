@@ -128,21 +128,14 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 	return 0
 }
 
-// selection is the branch-selection half of tidyOptions: which categories are
-// in play, and from what age a branch counts as stale.
+// selection is which categories are in play, and the stale threshold.
 type selection struct {
 	reasons    map[tidy.Reason]bool
 	staleAfter time.Duration
 }
 
-// tidySelection maps the three selector flags onto the categories Classify
-// should consider. It is a function of its arguments alone so the rule below —
-// the one that was built backwards the first time — can be tested by calling
-// it rather than by running the binary and reading the output.
-//
-// --merged and --gone narrow the selection to what they name; --stale only ever
-// adds, since "also clean up the old ones" should not quietly stop cleaning up
-// the safe ones.
+// tidySelection maps the selector flags onto the categories Classify should
+// consider. --merged and --gone narrow; --stale only ever adds.
 func tidySelection(merged, gone bool, stale staleFlag) (selection, error) {
 	sel := selection{reasons: map[tidy.Reason]bool{}}
 	if !merged && !gone {
@@ -155,8 +148,7 @@ func tidySelection(merged, gone bool, stale staleFlag) (selection, error) {
 	if gone {
 		sel.reasons[tidy.ReasonGone] = true
 	}
-	// --stale is both a selector and a threshold: bare it means "the default 90
-	// days", with a value it means that long.
+	// Bare --stale means the default threshold; with a value, that long.
 	if stale.set {
 		sel.reasons[tidy.ReasonStale] = true
 		if stale.value != "" {

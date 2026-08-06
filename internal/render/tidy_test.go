@@ -57,9 +57,8 @@ func TestTidyEmptyPlan(t *testing.T) {
 	}
 }
 
-// The dry-run footer is the difference between "this is what would happen" and
-// "this is what is about to happen"; it must not survive into the confirmation
-// prompt or the applied report.
+// The dry-run footer must not survive into the confirmation prompt or the
+// applied report.
 func TestTidyDryRunFooterOnlyOnDryRuns(t *testing.T) {
 	plan := goldenTidyPlan()
 	cases := []struct {
@@ -75,8 +74,8 @@ func TestTidyDryRunFooterOnlyOnDryRuns(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			Tidy(&buf, c.m, false)
-			if got := strings.Contains(buf.String(), "dry run"); got != c.want {
-				t.Errorf("contains dry run = %v, want %v:\n%s", got, c.want, buf.String())
+			if got := strings.Contains(buf.String(), "nothing has been deleted"); got != c.want {
+				t.Errorf("contains the dry-run footer = %v, want %v:\n%s", got, c.want, buf.String())
 			}
 		})
 	}

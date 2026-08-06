@@ -97,9 +97,7 @@ func TestParseBranches(t *testing.T) {
 		t.Fatalf("got %d branches, want 4", len(got))
 	}
 
-	// Tip is the hash `tidy` prints as the restore instruction for a branch it
-	// deletes, so an empty one turns "restore this with git branch <name>
-	// <hash>" into advice that cannot be followed.
+	// Tip is the hash tidy prints as the restore instruction.
 	wantTips := []string{
 		"1111111111111111111111111111111111111111",
 		"2222222222222222222222222222222222222222",
@@ -140,16 +138,12 @@ func TestParseBranches(t *testing.T) {
 }
 
 // TestParseBranchesShortRecords covers records with fewer fields than the
-// format asks for — the shape a future format change, an older git, or a
-// truncated read would produce. Parsing is best-effort by design: a record
-// missing the optional trailing field still yields a branch, and one missing a
-// required field is dropped. Neither may panic, because parseBranches runs on
-// whatever git actually printed.
+// format asks for: a missing optional field still yields a branch, a missing
+// required one is dropped, and neither panics.
 func TestParseBranchesShortRecords(t *testing.T) {
 	const us = "\x1f"
 
 	t.Run("six fields leave Tip empty", func(t *testing.T) {
-		// No objectname: exercises the len(f) > 6 guard's false arm.
 		line := strings.Join([]string{" ", "feature", "origin/feature", "ahead 1", "1700000000", "Ada"}, us)
 		got := parseBranches(line + "\n")
 		if len(got) != 1 {

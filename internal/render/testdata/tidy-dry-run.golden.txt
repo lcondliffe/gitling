@@ -11,8 +11,8 @@ TIDY  ·  4 of 9 branches
   stale, never merged   -D
     spike/old-idea      10mo ago   1122334
 
-  4 branches to delete, 3 needing -D
-  dry run — pass --apply to delete
+  4 branches would be deleted, 3 needing -D
+  nothing has been deleted — re-run with --apply to delete them
 
   kept release/1.x (protected by release/*)
 

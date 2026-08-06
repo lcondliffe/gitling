@@ -21,10 +21,8 @@ func reasons(rs ...tidy.Reason) map[tidy.Reason]bool {
 	return m
 }
 
-// TestTidySelection pins the rule the selector flags follow: --merged and
-// --gone narrow, --stale adds. The additive half is the one that was built
-// backwards first, so every combination is listed rather than a representative
-// few — the cases that matter are precisely the ones easy to leave out.
+// TestTidySelection pins the selector-flag rule: --merged and --gone narrow,
+// --stale adds.
 func TestTidySelection(t *testing.T) {
 	const day = 24 * time.Hour
 
@@ -51,10 +49,7 @@ func TestTidySelection(t *testing.T) {
 		gone:        true,
 		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone),
 	}, {
-		// The additive contract: --stale on its own must widen the default
-		// selection, not replace it. If this ever returns {stale} alone, a
-		// plain `gitling tidy --stale` silently stops offering to clean up the
-		// merged branches it used to.
+		// --stale alone must widen the default pair, not replace it.
 		name:        "stale alone adds to the default pair",
 		stale:       staleFlag{set: true},
 		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
@@ -75,8 +70,7 @@ func TestTidySelection(t *testing.T) {
 		stale:       staleFlag{set: true},
 		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
 	}, {
-		// Bare --stale leaves the threshold at zero so tidy.Options falls back
-		// to DefaultStaleAfter; it does not hard-code 90 days here.
+		// Zero threshold: tidy.Options falls back to DefaultStaleAfter.
 		name:           "bare stale leaves the threshold to the default",
 		stale:          staleFlag{set: true},
 		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
@@ -123,9 +117,7 @@ func TestTidySelectionRejectsBadStaleValue(t *testing.T) {
 	}
 }
 
-// newTidyFlags wires the two custom flag types into a flag set the same way
-// runTidy does, so these tests exercise them through the flag package rather
-// than by calling Set directly.
+// newTidyFlags wires the custom flag types up the way runTidy does.
 func newTidyFlags() (*flag.FlagSet, *staleFlag, *multiFlag) {
 	fs := flag.NewFlagSet("tidy", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -148,8 +140,6 @@ func TestStaleFlag(t *testing.T) {
 		args:    nil,
 		wantSet: false,
 	}, {
-		// The whole reason staleFlag exists: the flag package must accept
-		// --stale with no value, which it only does for a boolean flag.
 		name:      "bare",
 		args:      []string{"--stale"},
 		wantSet:   true,
@@ -160,11 +150,8 @@ func TestStaleFlag(t *testing.T) {
 		wantSet:   true,
 		wantValue: "180d",
 	}, {
-		// Being a boolean flag has a cost: a separated value is not consumed as
-		// the flag's argument, it is left as a positional. This is the state
-		// runTidy's adoption step exists to clean up, so pin it here — if the
-		// flag package ever stops behaving this way, that code is dead and
-		// this test says so.
+		// A boolean flag doesn't consume a separated value; runTidy adopts the
+		// leftover positional.
 		name:      "separated value is left as a positional",
 		args:      []string{"--stale", "180d"},
 		wantSet:   true,
@@ -226,8 +213,6 @@ func TestMultiFlag(t *testing.T) {
 		args: []string{"--protect=release/*"},
 		want: []string{"release/*"},
 	}, {
-		// Repeating a plain fs.String would keep only the last value; the point
-		// of multiFlag is that every --protect glob survives.
 		name: "repeated collects every value in order",
 		args: []string{"--protect=release/*", "--protect", "wip/*", "--protect=spike"},
 		want: []string{"release/*", "wip/*", "spike"},
