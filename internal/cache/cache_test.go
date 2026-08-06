@@ -1,5 +1,3 @@
-//go:build !sqlite
-
 package cache
 
 import (
@@ -12,7 +10,7 @@ import (
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	s := New(dir, aggregate.AuthorDate).(*Store)
+	s := New(dir, aggregate.AuthorDate)
 
 	agg := aggregate.New()
 	agg.Days["2024-06-02"] = aggregate.DayBucket{
@@ -43,7 +41,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestLoadMissing(t *testing.T) {
-	s := New(t.TempDir(), aggregate.AuthorDate).(*Store)
+	s := New(t.TempDir(), aggregate.AuthorDate)
 	if _, _, ok := s.Load(); ok {
 		t.Error("Load on missing cache returned ok = true")
 	}
@@ -51,7 +49,7 @@ func TestLoadMissing(t *testing.T) {
 
 func TestLoadVersionMismatch(t *testing.T) {
 	dir := t.TempDir()
-	s := New(dir, aggregate.AuthorDate).(*Store)
+	s := New(dir, aggregate.AuthorDate)
 	// Hand-write a payload with a stale version.
 	if err := os.MkdirAll(dirFor(s), 0o755); err != nil {
 		t.Fatal(err)
@@ -76,8 +74,8 @@ func TestLoadVersionMismatch(t *testing.T) {
 // is hand-crafted to claim the other's basis in its Version field.
 func TestBasesDoNotMix(t *testing.T) {
 	dir := t.TempDir()
-	authorStore := New(dir, aggregate.AuthorDate).(*Store)
-	commitStore := New(dir, aggregate.CommitDate).(*Store)
+	authorStore := New(dir, aggregate.AuthorDate)
+	commitStore := New(dir, aggregate.CommitDate)
 
 	if authorStore.path == commitStore.path {
 		t.Fatalf("author and commit stores share a path: %s", authorStore.path)

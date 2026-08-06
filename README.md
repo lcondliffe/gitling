@@ -171,17 +171,3 @@ isn't the default because shell-out is still faster on this project's
 benchmarks for the commit-log walk that dominates runtime. `GITLING_BACKEND=shell`
 forces shell-out in a tagged binary. The build is read-only, and known
 divergences are documented on `gogitRepo` in `internal/gitdata/gogit.go`.
-
-### Optional sqlite cache backend
-
-The default cache is a zero-dependency gob file under `.git/gitling-cache/`.
-For very large repos, a sqlite-backed store is available behind a build tag:
-
-```sh
-go build -tags sqlite ./cmd/gitling
-```
-
-It uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go
-and cgo-free, so the tagged build still cross-compiles without a C toolchain.
-It implements the same `cache.Backend` interface as the gob store, so gitling
-behaves identically either way; only the on-disk format changes.
