@@ -120,6 +120,17 @@ func (g *gogitRepo) IsAncestor(maybeAncestor, descendant string) bool {
 func (g *gogitRepo) Vitals() (Vitals, error) {
 	var v Vitals
 
+	// Everything here is independent of HEAD: a repository with no commits
+	// still has a git dir, a last-fetch time, and the same stale threshold.
+	// Set before the no-commits early return below, so an empty repo reports
+	// the same values the shell backend gives it rather than a null fetch
+	// time and a zero threshold.
+	v.StaleAfterDays = StaleBranchDays
+	if dir, dErr := g.GitDir(); dErr == nil {
+		v.Operation = detectOperation(dir)
+		v.LastFetch = lastFetch(dir)
+	}
+
 	head, err := g.repo.Head()
 	if err != nil {
 		// No commits yet (or detached with no ref at all).
@@ -180,14 +191,6 @@ func (g *gogitRepo) Vitals() (Vitals, error) {
 	// best-effort guess. OldestStash stays zero to match.
 	v.StashCount = 0
 
-	// Operation and fetch state are read straight off the filesystem, so both
-	// backends share one implementation (see state.go).
-	if dir, dErr := g.GitDir(); dErr == nil {
-		v.Operation = detectOperation(dir)
-		v.LastFetch = lastFetch(dir)
-	}
-
-	v.StaleAfterDays = StaleBranchDays
 	v.BranchCount, v.MergedBranches, v.GoneBranches, v.StaleBranches = g.branchHealth(v.Branch)
 
 	return v, nil
