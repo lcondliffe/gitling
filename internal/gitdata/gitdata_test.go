@@ -85,15 +85,31 @@ func TestParseTrack(t *testing.T) {
 
 func TestParseBranches(t *testing.T) {
 	const us = "\x1f"
-	// HEAD marker, name, upstream, track, committerdate(unix), authorname
-	sample := strings.Join([]string{"*", "main", "origin/main", "", "1700000000", "Ada"}, us) + "\n" +
-		strings.Join([]string{" ", "feature", "origin/feature", "ahead 2, behind 1", "1700100000", "Alan"}, us) + "\n" +
-		strings.Join([]string{" ", "stale", "origin/stale", "gone", "1700200000", "Grace"}, us) + "\n" +
-		strings.Join([]string{" ", "local-only", "", "", "1700300000", "Linus"}, us) + "\n"
+	// The seven fields Branches asks for, in order: HEAD marker, name,
+	// upstream, track, committerdate(unix), authorname, objectname.
+	sample := strings.Join([]string{"*", "main", "origin/main", "", "1700000000", "Ada", "1111111111111111111111111111111111111111"}, us) + "\n" +
+		strings.Join([]string{" ", "feature", "origin/feature", "ahead 2, behind 1", "1700100000", "Alan", "2222222222222222222222222222222222222222"}, us) + "\n" +
+		strings.Join([]string{" ", "stale", "origin/stale", "gone", "1700200000", "Grace", "3333333333333333333333333333333333333333"}, us) + "\n" +
+		strings.Join([]string{" ", "local-only", "", "", "1700300000", "Linus", "4444444444444444444444444444444444444444"}, us) + "\n"
 
 	got := parseBranches(sample)
 	if len(got) != 4 {
 		t.Fatalf("got %d branches, want 4", len(got))
+	}
+
+	// Tip is the hash `tidy` prints as the restore instruction for a branch it
+	// deletes, so an empty one turns "restore this with git branch <name>
+	// <hash>" into advice that cannot be followed.
+	wantTips := []string{
+		"1111111111111111111111111111111111111111",
+		"2222222222222222222222222222222222222222",
+		"3333333333333333333333333333333333333333",
+		"4444444444444444444444444444444444444444",
+	}
+	for i, want := range wantTips {
+		if got[i].Tip != want {
+			t.Errorf("branch %q Tip = %q, want %q", got[i].Name, got[i].Tip, want)
+		}
 	}
 
 	main := got[0]
@@ -121,6 +137,66 @@ func TestParseBranches(t *testing.T) {
 	if local.HasCompare || local.Gone || local.Upstream != "" {
 		t.Errorf("local-only should have no upstream and no comparison yet: %+v", local)
 	}
+}
+
+// TestParseBranchesShortRecords covers records with fewer fields than the
+// format asks for — the shape a future format change, an older git, or a
+// truncated read would produce. Parsing is best-effort by design: a record
+// missing the optional trailing field still yields a branch, and one missing a
+// required field is dropped. Neither may panic, because parseBranches runs on
+// whatever git actually printed.
+func TestParseBranchesShortRecords(t *testing.T) {
+	const us = "\x1f"
+
+	t.Run("six fields leave Tip empty", func(t *testing.T) {
+		// No objectname: exercises the len(f) > 6 guard's false arm.
+		line := strings.Join([]string{" ", "feature", "origin/feature", "ahead 1", "1700000000", "Ada"}, us)
+		got := parseBranches(line + "\n")
+		if len(got) != 1 {
+			t.Fatalf("got %d branches, want 1", len(got))
+		}
+		if got[0].Tip != "" {
+			t.Errorf("Tip = %q, want empty", got[0].Tip)
+		}
+		// Everything up to the missing field must still be populated.
+		if got[0].Name != "feature" || got[0].Ahead != 1 || got[0].LastAuthor != "Ada" {
+			t.Errorf("short record lost earlier fields: %+v", got[0])
+		}
+	})
+
+	t.Run("too few fields are skipped", func(t *testing.T) {
+		for _, line := range []string{
+			"",
+			"   ",
+			"no-separators-at-all",
+			strings.Join([]string{" ", "feature"}, us),
+			strings.Join([]string{" ", "feature", "origin/feature", "", "1700000000"}, us),
+		} {
+			if got := parseBranches(line + "\n"); len(got) != 0 {
+				t.Errorf("parseBranches(%q) = %+v, want no branches", line, got)
+			}
+		}
+	})
+
+	t.Run("a short record does not drop the good ones around it", func(t *testing.T) {
+		sample := strings.Join([]string{" ", "short", "origin/short"}, us) + "\n" +
+			strings.Join([]string{" ", "good", "origin/good", "", "1700000000", "Ada", "abc123"}, us) + "\n"
+		got := parseBranches(sample)
+		if len(got) != 1 {
+			t.Fatalf("got %d branches, want 1", len(got))
+		}
+		if got[0].Name != "good" || got[0].Tip != "abc123" {
+			t.Errorf("surviving branch = %+v", got[0])
+		}
+	})
+
+	t.Run("tip is trimmed", func(t *testing.T) {
+		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", " abc123 "}, us)
+		got := parseBranches(line + "\n")
+		if len(got) != 1 || got[0].Tip != "abc123" {
+			t.Fatalf("got %+v, want Tip %q", got, "abc123")
+		}
+	})
 }
 
 func TestParseRecentLog(t *testing.T) {

@@ -92,39 +92,20 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		return 2
 	}
 
+	sel, err := tidySelection(*merged, *gone, *stale)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		return 2
+	}
+
 	opts := tidyOptions{
-		reasons:   map[tidy.Reason]bool{},
-		protect:   append(append([]string{}, cfg.Protect...), protect...),
-		apply:     *apply,
-		assumeYes: *assumeYes,
-		fetch:     !*noFetch,
-		color:     colorEnabled(*color),
-	}
-	// --merged and --gone narrow the selection to what they name; --stale only
-	// ever adds, since "also clean up the old ones" should not quietly stop
-	// cleaning up the safe ones.
-	if !*merged && !*gone {
-		opts.reasons[tidy.ReasonMerged] = true
-		opts.reasons[tidy.ReasonGone] = true
-	}
-	if *merged {
-		opts.reasons[tidy.ReasonMerged] = true
-	}
-	if *gone {
-		opts.reasons[tidy.ReasonGone] = true
-	}
-	// --stale is both a selector and a threshold: bare it means "the default 90
-	// days", with a value it means that long.
-	if stale.set {
-		opts.reasons[tidy.ReasonStale] = true
-		if stale.value != "" {
-			days, err := parseSinceDays(stale.value)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "gitling: invalid --stale %q (use d, w, mo, y)\n", stale.value)
-				return 2
-			}
-			opts.staleAfter = time.Duration(days) * 24 * time.Hour
-		}
+		reasons:    sel.reasons,
+		staleAfter: sel.staleAfter,
+		protect:    append(append([]string{}, cfg.Protect...), protect...),
+		apply:      *apply,
+		assumeYes:  *assumeYes,
+		fetch:      !*noFetch,
+		color:      colorEnabled(*color),
 	}
 
 	if width, ok := render.TerminalWidth(os.Stdout); ok {
@@ -136,6 +117,48 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// selection is the branch-selection half of tidyOptions: which categories are
+// in play, and from what age a branch counts as stale.
+type selection struct {
+	reasons    map[tidy.Reason]bool
+	staleAfter time.Duration
+}
+
+// tidySelection maps the three selector flags onto the categories Classify
+// should consider. It is a function of its arguments alone so the rule below —
+// the one that was built backwards the first time — can be tested by calling
+// it rather than by running the binary and reading the output.
+//
+// --merged and --gone narrow the selection to what they name; --stale only ever
+// adds, since "also clean up the old ones" should not quietly stop cleaning up
+// the safe ones.
+func tidySelection(merged, gone bool, stale staleFlag) (selection, error) {
+	sel := selection{reasons: map[tidy.Reason]bool{}}
+	if !merged && !gone {
+		sel.reasons[tidy.ReasonMerged] = true
+		sel.reasons[tidy.ReasonGone] = true
+	}
+	if merged {
+		sel.reasons[tidy.ReasonMerged] = true
+	}
+	if gone {
+		sel.reasons[tidy.ReasonGone] = true
+	}
+	// --stale is both a selector and a threshold: bare it means "the default 90
+	// days", with a value it means that long.
+	if stale.set {
+		sel.reasons[tidy.ReasonStale] = true
+		if stale.value != "" {
+			days, err := parseSinceDays(stale.value)
+			if err != nil {
+				return selection{}, fmt.Errorf("invalid --stale %q (use d, w, mo, y)", stale.value)
+			}
+			sel.staleAfter = time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return sel, nil
 }
 
 func tidyRun(stdout io.Writer, stdin io.Reader, o tidyOptions) error {
