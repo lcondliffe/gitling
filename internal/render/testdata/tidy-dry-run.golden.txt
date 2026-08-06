@@ -1,0 +1,18 @@
+
+TIDY  ·  4 of 9 branches
+
+  merged into origin/main   -d
+    chore/tidy-readme   14d ago    a1b2c3d
+
+  upstream gone (squash-merged)   -D
+    feat/heatmap        1mo ago    9f8e7d6
+    fix/parse-numstat   3mo ago    4c5b6a7
+
+  stale, never merged   -D
+    spike/old-idea      10mo ago   1122334
+
+  4 branches to delete, 3 needing -D
+  dry run — pass --apply to delete
+
+  kept release/1.x (protected by release/*)
+

@@ -115,6 +115,8 @@ gitling --graph --bucket week --since 1y
 gitling churn --since 1y # file churn: all files, ranked by commit count
 gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
+gitling tidy             # dry run: local branches that are safe to delete
+gitling tidy --apply     # actually delete them (prompts once)
 gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --layout stack   # force one column; --layout wide forces two
 gitling --json           # structured dashboard data for scripts/integrations
@@ -123,6 +125,80 @@ gitling --date commit    # bucket by commit date instead of author date
 gitling --color=always   # force color even when stdout isn't a terminal
 gitling --config ~/gitling.json  # use an explicit config file
 ```
+
+## Tidy
+
+`gitling tidy` is the one subcommand that changes anything. It finds the local
+branches you're done with and, on request, deletes them:
+
+```
+gitling tidy                  # dry run over merged + upstream-gone branches
+gitling tidy --apply          # delete them, prompting once first
+gitling tidy --merged         # narrow to branches merged into the default branch
+gitling tidy --gone           # narrow to branches whose upstream was deleted
+gitling tidy --stale          # also include branches untouched for 90 days
+gitling tidy --stale 180d     # ...with a different threshold
+gitling tidy --protect 'release/*'   # never delete matching branches
+gitling tidy --apply --yes    # no prompt, for when you already know
+gitling tidy --no-fetch       # skip the pruning fetch
+```
+
+```text
+TIDY  ·  4 of 9 branches
+
+  merged into origin/main   -d
+    chore/tidy-readme   14d ago    a1b2c3d
+
+  upstream gone (squash-merged)   -D
+    feat/heatmap        1mo ago    9f8e7d6
+    fix/parse-numstat   3mo ago    4c5b6a7
+
+  4 branches to delete, 3 needing -D
+  dry run — pass --apply to delete
+```
+
+### What it selects, and how much it trusts each category
+
+Branches fall into three groups, and which group a branch lands in decides how
+it gets deleted:
+
+- **merged** — the tip is an ancestor of the default branch, so the work is
+  provably in. Deleted with `git branch -d`, leaving git's own merge check as a
+  second safety net under gitling's.
+- **gone** — the branch tracked a remote branch that no longer exists. This is
+  the shape a squash-merged pull request leaves behind: the commits landed under
+  new hashes, so git sees the branch as unmerged and only `-D` will drop it. The
+  forge deleting the remote branch on merge is the evidence that it's safe, and
+  it's circumstantial rather than proof — which is why the plan marks these
+  `-D` rather than hiding the distinction.
+- **stale** — old, and neither merged nor gone. This is the only category where
+  deleting can actually lose work, so it is never selected unless you ask for it
+  with `--stale`.
+
+`--merged` and `--gone` narrow the selection to what they name. `--stale` only
+ever adds: asking to also clean up the old ones shouldn't quietly stop cleaning
+up the safe ones.
+
+### Safety
+
+- **Dry run by default.** Nothing is deleted without `--apply`, which prompts
+  once (unless `--yes`) with the full plan on screen. Anything that isn't an
+  explicit `y` — a bare newline, no stdin at all — is a no.
+- **The current branch and the default branch are never deleted**, and neither
+  is anything matching a `--protect` glob or the `protect` list in the config
+  file. `--protect` adds to that list rather than replacing it.
+- **Every branch shows the commit it pointed at**, before and after deletion, so
+  anything can be restored with `git branch <name> <hash>`.
+- **It fetches with `--prune` first** (skip with `--no-fetch`), because "upstream
+  gone" is meaningless against stale remote-tracking refs. A failed fetch is a
+  warning, not a fatal error — being offline shouldn't stop you tidying merged
+  branches — but the warning says so, because the plan is then built on older
+  information.
+- A branch git refuses to delete is reported and the rest still run; one
+  failure doesn't leave the cleanup half done.
+
+`gitling tidy` needs the shell-out backend. Under `-tags gogit` it refuses, as
+that build is read-only.
 
 ### Color
 
@@ -150,9 +226,15 @@ Supported keys, all optional:
   "color": "auto",
   "bucket": "week",
   "recent": 5,
-  "layout": "auto"
+  "layout": "auto",
+  "protect": ["release/*", "wip/keep-me"]
 }
 ```
+
+`protect` is the exception to the precedence rule below: `gitling tidy
+--protect` adds to it rather than replacing it, since a config file saying
+"never delete release/*" shouldn't be switched off by naming one more pattern
+on the command line.
 
 Precedence: command-line flags always override the config file, which
 overrides gitling's built-in defaults. Panel toggles aren't yet

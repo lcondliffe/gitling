@@ -1,0 +1,19 @@
+
+TIDY  ·  3 branches deleted
+
+  merged into origin/main   -d
+    chore/tidy-readme   14d ago    a1b2c3d   deleted
+
+  upstream gone (squash-merged)   -D
+    feat/heatmap        1mo ago    9f8e7d6   kept: git branch -D: the branch is not fully merged
+    fix/parse-numstat   3mo ago    4c5b6a7   deleted
+
+  stale, never merged   -D
+    spike/old-idea      10mo ago   1122334   deleted
+
+  3 branches deleted
+  1 kept after errors
+  restore any of these with: git branch <name> <hash>
+
+  kept release/1.x (protected by release/*)
+

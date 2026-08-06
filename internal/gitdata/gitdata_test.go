@@ -342,8 +342,8 @@ func TestLocalBranchName(t *testing.T) {
 		"":               "",
 	}
 	for in, want := range cases {
-		if got := localBranchName(in); got != want {
-			t.Errorf("localBranchName(%q) = %q, want %q", in, got, want)
+		if got := LocalBranchName(in); got != want {
+			t.Errorf("LocalBranchName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
