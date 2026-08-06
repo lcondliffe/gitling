@@ -275,7 +275,7 @@ func recentTitle(m Model) string {
 // The *Lines helpers render one panel's body (no header, no surrounding blank
 // lines) at the given width, ready to be framed by box.
 func (p palette) vitalsLines(m Model, width int) []string {
-	return capture(func(w io.Writer) { p.vitals(w, m.Vitals, width) })
+	return capture(func(w io.Writer) { p.vitals(w, m, width) })
 }
 
 func (p palette) heatmapLines(m Model, width int) []string {
@@ -566,24 +566,120 @@ func (p palette) header(w io.Writer, label, suffix string) {
 // vitals prints the one-line repo status bar. When the parts don't fit the
 // available width they wrap onto further lines rather than being clipped: every
 // field here is a distinct fact, so losing the tail loses information.
-func (p palette) vitals(w io.Writer, v gitdata.Vitals, width int) {
+// staleFetch is how old the last fetch has to be before the panel calls it out.
+// Ahead/behind is measured against remote-tracking refs, so past roughly a day
+// "↓0" stops meaning "nothing upstream" and starts meaning "nothing I know of".
+const staleFetch = 24 * time.Hour
+
+func (p palette) vitals(w io.Writer, m Model, width int) {
+	v := m.Vitals
+	// The status dot escalates: green clean, amber for uncommitted work, red
+	// when the repo is mid-operation and needs finishing before anything else.
 	dotColor := cAccent
-	if v.DirtyFiles > 0 {
+	switch {
+	case v.Operation.InProgress() || v.Conflicts > 0:
+		dotColor = cRed
+	case v.DirtyFiles > 0:
 		dotColor = cAmber
 	}
+
 	parts := []string{p.c(dotColor, "●") + " " + p.c(cBright, v.Branch)}
+	// An interrupted rebase/merge outranks everything else on the line, so it
+	// goes first, right after the branch.
+	if v.Operation.InProgress() {
+		parts = append(parts, p.c(cRed, operationLabel(v.Operation)))
+	}
 	if v.HasUpstream {
 		parts = append(parts, fmt.Sprintf("%s%d %s%d",
 			p.c(cAccent, "↑"), v.Ahead, p.c(cLabel, "↓"), v.Behind))
 	}
-	parts = append(parts,
-		p.c(cLabel, fmt.Sprintf("%d dirty", v.DirtyFiles)),
-		p.c(cLabel, fmt.Sprintf("%d %s", v.StashCount, plural(v.StashCount, "stash", "stashes"))),
-		p.c(cLabel, fmt.Sprintf("%d %s", v.BranchCount, plural(v.BranchCount, "branch", "branches"))),
-	)
+	if !v.LastFetch.IsZero() {
+		fetchColor := cLabel
+		if m.Now.Sub(v.LastFetch) >= staleFetch {
+			fetchColor = cAmber
+		}
+		parts = append(parts, p.c(fetchColor, "fetched "+humanAgo(v.LastFetch, m.Now)))
+	}
+	parts = append(parts, p.dirtyParts(v)...)
+	if v.StashCount > 0 {
+		stash := fmt.Sprintf("%d %s", v.StashCount, plural(v.StashCount, "stash", "stashes"))
+		if !v.OldestStash.IsZero() {
+			// "(oldest 7mo ago)" reads worse than "(oldest 7mo)" next to a count.
+			stash += fmt.Sprintf(" (oldest %s)", strings.TrimSuffix(humanAgo(v.OldestStash, m.Now), " ago"))
+		}
+		parts = append(parts, p.c(cLabel, stash))
+	}
+
+	// Branch health gets its own line when there is anything to act on, because
+	// it is the one group whose parts only make sense read together.
+	branch := p.branchParts(v)
+	if len(branch) == 1 {
+		parts = append(parts, branch...)
+		branch = nil
+	}
 	for _, line := range packParts(parts, width-2, 3) {
 		fmt.Fprintln(w, "  "+line)
 	}
+	for _, line := range packParts(branch, width-2, 3) {
+		fmt.Fprintln(w, "  "+line)
+	}
+}
+
+// operationLabel names an in-progress operation, with its position in the
+// sequence when git tracks one.
+func operationLabel(op gitdata.Operation) string {
+	if op.Total > 0 {
+		return fmt.Sprintf("⚠ %s %d/%d", op.Kind, op.Step, op.Total)
+	}
+	return "⚠ " + op.Kind + " in progress"
+}
+
+// dirtyParts breaks the working tree down by what kind of change each file
+// carries, which says far more than a single count about whether you were
+// mid-commit. Staged and modified overlap by design (see gitdata.Vitals), so
+// no total is shown alongside them; empty categories are dropped entirely.
+func (p palette) dirtyParts(v gitdata.Vitals) []string {
+	if v.DirtyFiles == 0 {
+		return []string{p.c(cLabel, "clean")}
+	}
+	var parts []string
+	if v.Conflicts > 0 {
+		parts = append(parts, p.c(cRed, fmt.Sprintf("%d %s", v.Conflicts, plural(v.Conflicts, "conflict", "conflicts"))))
+	}
+	for _, part := range []struct {
+		n     int
+		label string
+	}{
+		{v.Staged, "staged"},
+		{v.Modified, "modified"},
+		{v.Untracked, "untracked"},
+	} {
+		if part.n > 0 {
+			parts = append(parts, p.c(cLabel, fmt.Sprintf("%d %s", part.n, part.label)))
+		}
+	}
+	if len(parts) == 0 {
+		// Every entry fell outside the breakdown (a status code we don't
+		// classify); fall back to the bare total rather than showing nothing.
+		parts = append(parts, p.c(cLabel, fmt.Sprintf("%d dirty", v.DirtyFiles)))
+	}
+	return parts
+}
+
+// branchParts renders the branch count plus the cleanup-candidate counts. A
+// repo with nothing to clean up gets just the count, exactly as before.
+func (p palette) branchParts(v gitdata.Vitals) []string {
+	parts := []string{p.c(cLabel, fmt.Sprintf("%d %s", v.BranchCount, plural(v.BranchCount, "branch", "branches")))}
+	if v.MergedBranches > 0 {
+		parts = append(parts, p.c(cLabel, fmt.Sprintf("%d merged", v.MergedBranches)))
+	}
+	if v.GoneBranches > 0 {
+		parts = append(parts, p.c(cAmber, fmt.Sprintf("%d gone", v.GoneBranches)))
+	}
+	if v.StaleBranches > 0 {
+		parts = append(parts, p.c(cAmber, fmt.Sprintf("%d stale >%dd", v.StaleBranches, v.StaleAfterDays)))
+	}
+	return parts
 }
 
 // packParts greedily groups parts into lines at most width visible columns
@@ -591,6 +687,9 @@ func (p palette) vitals(w io.Writer, v gitdata.Vitals, width int) {
 // goes on one line, as it always did when the terminal width is unknown.
 func packParts(parts []string, width, sep int) []string {
 	gap := strings.Repeat(" ", sep)
+	if len(parts) == 0 {
+		return nil // no parts is no lines, not one blank one
+	}
 	if width <= 0 {
 		return []string{strings.Join(parts, gap)}
 	}

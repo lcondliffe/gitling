@@ -45,7 +45,8 @@ shape, and `--layout auto` (the default) picks per terminal:
 
 ```text
 ╭─ REPO ──────────────────────────────────────────────────────────────────────╮
-│  ● main   ↑0 ↓0   5 dirty   0 stashes   23 branches                         │
+│  ● main   ↑0 ↓0   fetched 2h ago   2 staged   1 stash (oldest 7mo)          │
+│  23 branches   12 merged   8 gone   17 stale >90d                           │
 ╰─────────────────────────────────────────────────────────────────────────────╯
 ╭─ ACTIVITY · last 14 weeks ─────────────╮ ╭─ TOP CONTRIBUTORS ───────────────╮
 │  · · · · · · · · · · · · · · □         │ │  Ada Lovelace    ██████████  33  │
@@ -62,7 +63,7 @@ shape, and `--layout auto` (the default) picks per terminal:
 
 The panels:
 
-1. **Repo vitals** — branch, ahead/behind upstream, dirty files, stashes, branches.
+1. **Repo vitals** — the "what state am I actually in" line (see below).
 2. **Activity heatmap** — GitHub-style contribution grid (default last 14 weeks),
    5-step intensity, today's cell marked with a hollow square. Total commits and
    current streak below.
@@ -75,6 +76,34 @@ The panels:
 5. **Top contributors** — up to 5 authors by commit count in range, with bars.
 6. **Codebase growth** — total LOC, 6-month percent change, and a trend
    sparkline.
+
+### Repo vitals
+
+Every other panel is retrospective; this one is the state you're standing in
+right now. It carries:
+
+- **Branch and ahead/behind** vs the upstream, and a status dot that goes green
+  (clean) → amber (uncommitted work) → red (mid-operation or conflicted).
+- **In-progress operations.** A half-finished rebase, merge, cherry-pick,
+  revert, `am`, or bisect is announced first, with the position in the sequence
+  when git tracks one (`⚠ rebase 3/7`). This is read from the state files in the
+  git dir, so it costs nothing and it's the thing you most need to see on
+  walking back into a repo you left mid-flight.
+- **Fetch age.** Ahead/behind is measured against remote-tracking refs, which
+  are exactly as fresh as your last fetch — `↑0 ↓0` means something very
+  different an hour after a fetch than a week after one. Shown in amber once
+  it's over a day old, and omitted entirely for a repo that has never fetched.
+- **Working tree by kind** — staged, modified, untracked, and conflicts,
+  instead of one dirty count, so you can tell "mid-commit" from "just started".
+  Staged and modified overlap (a file can be both); empty categories are
+  dropped, and a clean tree just says `clean`.
+- **Stashes with the age of the oldest.** `3 stashes (oldest 7mo)` is a
+  finding; `3 stashes` is not.
+- **Branch health** — the total, plus how many are cleanup candidates: merged
+  into the default branch, upstream deleted (`gone`), or untouched for over 90
+  days. The current and default branches are never counted as candidates, and
+  the three categories overlap. When there's nothing to clean up this collapses
+  back to a bare count on the main line.
 
 ## Usage
 
