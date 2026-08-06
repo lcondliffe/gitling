@@ -151,4 +151,5 @@ shouldn't be switched off by naming one more pattern.
 go build ./cmd/gitling
 ```
 
-Pure Go standard library — no external dependencies.
+Pure Go standard library: `go.mod` has no requirements and there is no
+`go.sum`. Needs `git` on `PATH` at runtime.

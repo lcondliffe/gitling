@@ -19,7 +19,6 @@ import (
 // A build tag was the alternative and was rejected — CI runs a bare
 // `go test ./...`, so a tag would mean the write layer's only tests never run
 // on any pull request, which is the situation this suite exists to end.
-//
 
 // requireGit skips the calling test when there is no usable git on PATH.
 func requireGit(t *testing.T) {
@@ -115,11 +114,11 @@ func newFixture(t *testing.T) fixture {
 }
 
 // repo opens the fixture with the shell backend under test.
-func (f fixture) repo(t *testing.T) *shellRepo {
+func (f fixture) repo(t *testing.T) *Repo {
 	t.Helper()
-	r, err := openShell(f.local)
+	r, err := Open(f.local)
 	if err != nil {
-		t.Fatalf("openShell: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	return r
 }
@@ -135,7 +134,7 @@ func (f fixture) branchOnRemoteDeleted(t *testing.T, name string) {
 }
 
 // branches indexes Branches() by name for assertions.
-func branchesByName(t *testing.T, r *shellRepo) map[string]Branch {
+func branchesByName(t *testing.T, r *Repo) map[string]Branch {
 	t.Helper()
 	got, err := r.Branches()
 	if err != nil {
@@ -427,7 +426,7 @@ func TestIntegrationDefaultBranch(t *testing.T) {
 // that is not a repository must fail rather than silently behaving as one.
 func TestIntegrationOpenRejectsNonRepo(t *testing.T) {
 	requireGit(t)
-	if _, err := openShell(t.TempDir()); err == nil {
-		t.Error("openShell on a non-repository should fail")
+	if _, err := Open(t.TempDir()); err == nil {
+		t.Error("Open on a non-repository should fail")
 	}
 }
