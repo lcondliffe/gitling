@@ -1,16 +1,8 @@
 // Package gitdata is the git interaction layer for gitling.
 //
-// The default build shells out to the `git` binary: for log aggregation and
-// the cheap working-tree queries this is both simpler and faster than a pure-
-// Go walk. The git interaction surface is captured in the Backend interface;
-// Repo (this file's public type) is a thin dispatcher over whichever Backend
-// was selected, so the aggregate/cache/render layers never need to know which
-// one is in use.
-//
-// An optional pure-Go go-git backend is available behind the `gogit` build
-// tag (see gogit.go, backend_gogit.go); without that tag the default build
-// stays dependency-free and only the shell-out backend in this file
-// (shellRepo) is compiled in.
+// It shells out to the `git` binary: for log aggregation and the cheap
+// working-tree queries this is both simpler and faster than a pure-Go walk,
+// and it keeps gitling free of external dependencies.
 package gitdata
 
 import (

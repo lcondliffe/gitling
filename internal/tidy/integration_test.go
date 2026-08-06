@@ -75,11 +75,6 @@ func realRepo(t *testing.T) (*gitdata.Repo, string) {
 	t.Helper()
 	requireGit(t)
 
-	// gitdata.Open picks its backend at build time, and the gogit backend is
-	// deliberately read-only. This escape hatch pins the shell backend so these
-	// tests exercise the same code under both tag builds.
-	t.Setenv("GITLING_BACKEND", "shell")
-
 	root := t.TempDir()
 	local := filepath.Join(root, "local")
 	remote := filepath.Join(root, "remote.git")
@@ -294,7 +289,6 @@ func TestRealRepoUnforcedDeleteMatchesGit(t *testing.T) {
 // it is surprising enough to be worth a test that says so out loud.
 func TestMergedIsMeasuredAgainstTheRemoteDefaultBranch(t *testing.T) {
 	requireGit(t)
-	t.Setenv("GITLING_BACKEND", "shell")
 
 	root := t.TempDir()
 	local := filepath.Join(root, "local")

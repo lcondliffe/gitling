@@ -1,11 +1,7 @@
 package gitdata
 
-// Backend is the git interaction surface gitling needs. The default build
-// only ever compiles the shell-out implementation (shellRepo in gitdata.go);
-// an optional pure-Go go-git implementation (gogitRepo in gogit.go) is
-// available behind the `gogit` build tag. See newBackend in
-// backend_default.go / backend_gogit.go for how the concrete backend is
-// chosen.
+// Backend is the git interaction surface gitling needs, implemented by
+// shelling out to the git binary (shellRepo in gitdata.go).
 type Backend interface {
 	GitDir() (string, error)
 	Head() (string, error)
@@ -22,15 +18,12 @@ type Backend interface {
 	DeleteBranch(name string, force bool) error
 }
 
-// Repo is a handle to a git repository, backed by whichever Backend was
-// selected at build (and optionally run) time. Its public API is stable
-// across backends so callers never need to know which one is in use.
+// Repo is a handle to a git repository.
 type Repo struct {
 	backend Backend
 }
 
-// Open verifies dir is inside a git work tree and returns a Repo backed by
-// the selected Backend implementation.
+// Open verifies dir is inside a git work tree and returns a Repo.
 func Open(dir string) (*Repo, error) {
 	b, err := newBackend(dir)
 	if err != nil {

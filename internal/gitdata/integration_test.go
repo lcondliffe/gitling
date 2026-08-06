@@ -20,10 +20,6 @@ import (
 // `go test ./...`, so a tag would mean the write layer's only tests never run
 // on any pull request, which is the situation this suite exists to end.
 //
-// Backend: these call openShell directly rather than Open. Open is
-// build-tag-dependent, and under `-tags gogit` it returns a backend whose
-// Fetch and DeleteBranch are deliberately errReadOnly stubs. Pinning the shell
-// backend explicitly means this file runs identically under both tag builds.
 
 // requireGit skips the calling test when there is no usable git on PATH.
 func requireGit(t *testing.T) {
