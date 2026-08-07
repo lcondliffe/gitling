@@ -43,6 +43,9 @@ func gitAt(t *testing.T, dir string, when time.Time, args ...string) string {
 		"GIT_COMMITTER_EMAIL=author@example.com",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0",
+		// HOME alone leaves XDG_CONFIG_HOME in play; pin both config files.
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
 		"HOME="+dir,
 	)
 	if !when.IsZero() {
@@ -345,10 +348,11 @@ func TestMergedIsMeasuredAgainstTheRemoteDefaultBranch(t *testing.T) {
 			"strength of a merge nobody else can see")
 	}
 
-	// And git agrees, which is the point: the classification matches what an
-	// unforced delete would actually do.
+	// git measures merged-ness against HEAD, so it accepts -d here. gitling is
+	// deliberately stricter: it would force-delete a branch git would have
+	// dropped unforced, never the other way round.
 	if err := repo.DeleteBranch("local-merge", false); err != nil {
-		t.Logf("git also refuses -d here, as expected: %v", err)
+		t.Errorf("git refused -d on a branch merged into the checked-out main: %v", err)
 	}
 }
 

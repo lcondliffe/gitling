@@ -54,7 +54,10 @@ func gitCmdAt(t *testing.T, dir string, when time.Time, args ...string) string {
 		"GIT_COMMITTER_EMAIL=author@example.com",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0",
-		"HOME="+dir, // don't pick up the real user's global git config
+		// HOME alone leaves XDG_CONFIG_HOME in play; pin both config files.
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
+		"HOME="+dir,
 	)
 	if !when.IsZero() {
 		stamp := when.Format(time.RFC3339)
