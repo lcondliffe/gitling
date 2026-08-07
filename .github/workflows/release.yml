@@ -3,6 +3,14 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Called by release-please, whose GITHUB_TOKEN-pushed tag cannot trigger the
+  # push event above.
+  workflow_call:
+    inputs:
+      tag:
+        description: tag to build and publish, e.g. v1.2.3
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -24,6 +32,8 @@ jobs:
           - { goos: windows, goarch: amd64 }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v5
         with:
@@ -35,7 +45,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           bin=gitling
           [ "$GOOS" = windows ] && bin=gitling.exe
@@ -61,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -76,7 +87,7 @@ jobs:
 
       - name: release notes
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
@@ -96,18 +107,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            echo "Release ${GITHUB_REF_NAME} already exists; refreshing notes and assets"
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "gitling ${GITHUB_REF_NAME}" \
-              --notes-file notes.md
-            gh release upload "${GITHUB_REF_NAME}" \
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            # Already published — by a previous run, or by release-please, which
+            # writes the changelog as the body. Attach assets, leave notes be.
+            echo "Release ${TAG} already exists; uploading assets"
+            gh release upload "${TAG}" \
               --clobber \
               dist/gitling_* dist/checksums.txt
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "gitling ${GITHUB_REF_NAME}" \
+            gh release create "${TAG}" \
+              --title "gitling ${TAG}" \
               --notes-file notes.md \
               dist/gitling_* dist/checksums.txt
           fi
@@ -115,7 +126,7 @@ jobs:
       - name: update Homebrew tap formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           SOURCE_REPO: ${{ github.repository }}
           TAP_REPO: ${{ env.HOMEBREW_TAP_REPO }}
         run: |
