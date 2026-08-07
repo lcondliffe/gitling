@@ -200,6 +200,14 @@ func TestParseBranchesShortRecords(t *testing.T) {
 		}
 	})
 
+	t.Run("worktree path keeps its spaces but loses the line ending", func(t *testing.T) {
+		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", "abc123", "/tmp/a dir "}, us)
+		got := parseBranches(line + "\r\n")
+		if len(got) != 1 || got[0].Worktree != "/tmp/a dir " {
+			t.Fatalf("Worktree = %q, want %q", got[0].Worktree, "/tmp/a dir ")
+		}
+	})
+
 	t.Run("tip is trimmed", func(t *testing.T) {
 		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", " abc123 "}, us)
 		got := parseBranches(line + "\n")

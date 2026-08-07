@@ -496,7 +496,9 @@ func parseBranches(out string) []Branch {
 			b.Tip = strings.TrimSpace(f[6])
 		}
 		if len(f) > 7 {
-			b.Worktree = strings.TrimSpace(f[7])
+			// Last field, so it carries the line ending on Windows. Trim only
+			// that: a path may legitimately begin or end with a space.
+			b.Worktree = strings.TrimRight(f[7], "\r\n")
 		}
 		switch track := strings.TrimSpace(f[3]); {
 		case track == "gone":
