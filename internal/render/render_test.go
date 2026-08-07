@@ -306,6 +306,208 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	}
 }
 
+func TestJSONVitalsStateFields(t *testing.T) {
+	now := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	model := Model{
+		Now: now,
+		Vitals: gitdata.Vitals{
+			Branch:         "main",
+			Operation:      gitdata.Operation{Kind: gitdata.OpRebase, Step: 3, Total: 7},
+			LastFetch:      now.Add(-2 * time.Hour),
+			DirtyFiles:     4,
+			Staged:         1,
+			Modified:       2,
+			Untracked:      1,
+			Conflicts:      1,
+			StashCount:     2,
+			OldestStash:    now.AddDate(0, 0, -30),
+			BranchCount:    50,
+			MergedBranches: 12,
+			GoneBranches:   8,
+			StaleBranches:  22,
+			StaleAfterDays: gitdata.StaleBranchDays,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := JSON(&buf, model, "day", nil); err != nil {
+		t.Fatalf("JSON returned error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, buf.String())
+	}
+	vitals := got["vitals"].(map[string]any)
+
+	for key, want := range map[string]any{
+		"staged":           float64(1),
+		"modified":         float64(2),
+		"untracked":        float64(1),
+		"conflicts":        float64(1),
+		"merged_branches":  float64(12),
+		"gone_branches":    float64(8),
+		"stale_branches":   float64(22),
+		"stale_after_days": float64(gitdata.StaleBranchDays),
+		"last_fetch":       "2024-06-15T10:00:00Z",
+		"oldest_stash":     "2024-05-16T12:00:00Z",
+	} {
+		if vitals[key] != want {
+			t.Errorf("vitals[%q] = %#v, want %#v", key, vitals[key], want)
+		}
+	}
+
+	op := vitals["operation"].(map[string]any)
+	if op["kind"] != "rebase" || op["step"] != float64(3) || op["total"] != float64(7) {
+		t.Errorf("operation = %#v", op)
+	}
+}
+
+// An idle repo must serialize "nothing happening" as null rather than as a zero
+// date or an empty operation object, so consumers can tell the cases apart.
+func TestJSONVitalsIdleStateIsNull(t *testing.T) {
+	var buf bytes.Buffer
+	if err := JSON(&buf, Model{Vitals: gitdata.Vitals{Branch: "main"}}, "day", nil); err != nil {
+		t.Fatalf("JSON returned error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	vitals := got["vitals"].(map[string]any)
+	for _, key := range []string{"operation", "last_fetch", "oldest_stash"} {
+		v, ok := vitals[key]
+		if !ok {
+			t.Errorf("vitals is missing key %q", key)
+			continue
+		}
+		if v != nil {
+			t.Errorf("vitals[%q] = %#v, want null", key, v)
+		}
+	}
+}
+
+// vitalsPanel renders just the REPO panel's content lines for a set of vitals.
+func vitalsPanel(t *testing.T, v gitdata.Vitals, now time.Time) string {
+	t.Helper()
+	return strings.Join(palette{}.vitalsLines(Model{Vitals: v, Now: now}, 0), "\n")
+}
+
+func TestVitalsShowsInProgressOperation(t *testing.T) {
+	now := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	got := vitalsPanel(t, gitdata.Vitals{
+		Branch:     "feature",
+		Operation:  gitdata.Operation{Kind: gitdata.OpRebase, Step: 3, Total: 7},
+		DirtyFiles: 1,
+		Conflicts:  1,
+	}, now)
+
+	if !strings.Contains(got, "rebase 3/7") {
+		t.Errorf("missing rebase position:\n%s", got)
+	}
+	if !strings.Contains(got, "1 conflict") {
+		t.Errorf("missing conflict count:\n%s", got)
+	}
+}
+
+// Operations git tracks no position for still get named.
+func TestVitalsOperationWithoutPosition(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{Branch: "main", Operation: gitdata.Operation{Kind: gitdata.OpBisect}}, time.Now())
+	if !strings.Contains(got, "bisect in progress") {
+		t.Errorf("missing bisect label:\n%s", got)
+	}
+}
+
+func TestVitalsDirtyBreakdownOmitsEmptyCategories(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{
+		Branch: "main", DirtyFiles: 3, Modified: 2, Untracked: 1,
+	}, time.Now())
+
+	if !strings.Contains(got, "2 modified") || !strings.Contains(got, "1 untracked") {
+		t.Errorf("missing breakdown:\n%s", got)
+	}
+	if strings.Contains(got, "staged") {
+		t.Errorf("empty category should be dropped:\n%s", got)
+	}
+}
+
+func TestVitalsCleanTree(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{Branch: "main", BranchCount: 1}, time.Now())
+	if !strings.Contains(got, "clean") {
+		t.Errorf("clean tree should say so:\n%s", got)
+	}
+}
+
+// A status code the breakdown doesn't classify must not make the working tree
+// look clean; the bare total stands in.
+func TestVitalsUnclassifiedDirtyFilesFallBackToTotal(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{Branch: "main", DirtyFiles: 2}, time.Now())
+	if !strings.Contains(got, "2 dirty") {
+		t.Errorf("want a dirty total as fallback:\n%s", got)
+	}
+	if strings.Contains(got, "clean") {
+		t.Errorf("2 dirty files is not clean:\n%s", got)
+	}
+}
+
+func TestVitalsFetchAgeAndStashAge(t *testing.T) {
+	now := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	got := vitalsPanel(t, gitdata.Vitals{
+		Branch:      "main",
+		LastFetch:   now.Add(-5 * 24 * time.Hour),
+		StashCount:  2,
+		OldestStash: now.AddDate(0, 0, -210),
+	}, now)
+
+	if !strings.Contains(got, "fetched 5d ago") {
+		t.Errorf("missing fetch age:\n%s", got)
+	}
+	// "(oldest 7mo)", not "(oldest 7mo ago)", next to the count.
+	if !strings.Contains(got, "2 stashes (oldest 7mo)") {
+		t.Errorf("missing stash age:\n%s", got)
+	}
+}
+
+// A repo that has never fetched shows nothing rather than a bogus age, and an
+// empty stash stack is not worth a line of the panel.
+func TestVitalsOmitsUnknownFetchAndEmptyStash(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{Branch: "main", BranchCount: 1}, time.Now())
+	if strings.Contains(got, "fetched") {
+		t.Errorf("never-fetched repo should not claim a fetch:\n%s", got)
+	}
+	if strings.Contains(got, "stash") {
+		t.Errorf("empty stash stack should be omitted:\n%s", got)
+	}
+}
+
+func TestVitalsBranchHealthGetsItsOwnLine(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{
+		Branch: "main", BranchCount: 50,
+		MergedBranches: 12, GoneBranches: 8, StaleBranches: 22, StaleAfterDays: 90,
+	}, time.Now())
+
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want a second line for branch health, got %d line(s):\n%s", len(lines), got)
+	}
+	for _, want := range []string{"50 branches", "12 merged", "8 gone", "22 stale >90d"} {
+		if !strings.Contains(lines[1], want) {
+			t.Errorf("branch line missing %q:\n%s", want, lines[1])
+		}
+	}
+}
+
+// With nothing to clean up, the branch count stays on the main line rather than
+// spending a whole row on one number.
+func TestVitalsBranchCountStaysInlineWhenNothingToCleanUp(t *testing.T) {
+	got := vitalsPanel(t, gitdata.Vitals{Branch: "main", BranchCount: 3}, time.Now())
+	if lines := strings.Split(got, "\n"); len(lines) != 1 {
+		t.Fatalf("want a single line, got %d:\n%s", len(lines), got)
+	}
+	if !strings.Contains(got, "3 branches") {
+		t.Errorf("missing branch count:\n%s", got)
+	}
+}
+
 // dashboardTestModel is a fully populated model for layout tests.
 func dashboardTestModel(now time.Time) Model {
 	days := buildTestDays(now, 30)

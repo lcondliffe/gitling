@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -25,9 +26,20 @@ import (
 //     header), whereas shell-out uses `%aN`/`%aE` which apply .mailmap. Repos
 //     using .mailmap to collapse split identities will see more distinct
 //     authors under this backend.
-//   - StashCount is always 0: go-git has no porcelain equivalent of
-//     `git stash list` (it does not track refs/stash as a reflog-backed
-//     stack), so this is a known gap rather than a best-effort guess.
+//   - StashCount is always 0 (and OldestStash is the zero time): go-git has no
+//     porcelain equivalent of `git stash list` (it does not track refs/stash as
+//     a reflog-backed stack), so this is a known gap rather than a best-effort
+//     guess.
+//   - Working-tree counts (DirtyFiles and the Staged/Modified/Untracked
+//     breakdown) are go-git's Status, which lists every file under an untracked
+//     directory individually where `git status --porcelain` collapses it to the
+//     directory. A repo with one untracked directory of 200 files reads as 200
+//     untracked entries here and 1 under shell-out.
+//   - In a linked worktree, the per-worktree operation state (Vitals.Operation)
+//     is read from whichever directory GitDir reports rather than from a
+//     separately resolved worktree dir, so a rebase running in one linked
+//     worktree may not be attributed to the right one. Shell-out distinguishes
+//     the worktree git dir from the common dir and gets this right.
 //   - Ahead/behind counts are computed with a simple merge-base + linear
 //     history walk (see aheadBehind below), which is O(history) rather than
 //     git's optimized graph walk. For very large histories this is slower
@@ -108,6 +120,17 @@ func (g *gogitRepo) IsAncestor(maybeAncestor, descendant string) bool {
 func (g *gogitRepo) Vitals() (Vitals, error) {
 	var v Vitals
 
+	// Everything here is independent of HEAD: a repository with no commits
+	// still has a git dir, a last-fetch time, and the same stale threshold.
+	// Set before the no-commits early return below, so an empty repo reports
+	// the same values the shell backend gives it rather than a null fetch
+	// time and a zero threshold.
+	v.StaleAfterDays = StaleBranchDays
+	if dir, dErr := g.GitDir(); dErr == nil {
+		v.Operation = detectOperation(dir)
+		v.LastFetch = lastFetch(dir)
+	}
+
 	head, err := g.repo.Head()
 	if err != nil {
 		// No commits yet (or detached with no ref at all).
@@ -144,17 +167,31 @@ func (g *gogitRepo) Vitals() (Vitals, error) {
 	if wt, wErr := g.repo.Worktree(); wErr == nil {
 		if st, sErr := wt.Status(); sErr == nil {
 			v.DirtyFiles = len(st)
+			for _, s := range st {
+				x, y := byte(s.Staging), byte(s.Worktree)
+				switch {
+				case x == byte(git.Untracked) && y == byte(git.Untracked):
+					v.Untracked++
+				case isConflict(x, y):
+					v.Conflicts++
+				default:
+					if x != byte(git.Unmodified) {
+						v.Staged++
+					}
+					if y != byte(git.Unmodified) {
+						v.Modified++
+					}
+				}
+			}
 		}
 	}
 
 	// go-git has no porcelain `git stash list` equivalent; see the type-level
 	// comment on gogitRepo for why this is a documented 0 rather than a
-	// best-effort guess.
+	// best-effort guess. OldestStash stays zero to match.
 	v.StashCount = 0
 
-	if count, cErr := g.branchCount(); cErr == nil {
-		v.BranchCount = count
-	}
+	v.BranchCount, v.MergedBranches, v.GoneBranches, v.StaleBranches = g.branchHealth(v.Branch)
 
 	return v, nil
 }
@@ -170,6 +207,60 @@ func (g *gogitRepo) branchCount() (int, error) {
 		return nil
 	})
 	return count, err
+}
+
+// branchHealth counts local branches and the cleanup-candidate subsets among
+// them, mirroring the shell backend's counts (see Vitals). current names the
+// checked-out branch, which — along with the default branch — is excluded from
+// the candidate counts.
+//
+// Where shell-out gets "merged" from a single `git branch --merged`, this walks
+// history once per branch to test ancestry, so it is O(branches x history);
+// see the gogitRepo type comment on why that trade is acceptable here.
+func (g *gogitRepo) branchHealth(current string) (total, merged, gone, stale int) {
+	branches, err := g.Branches()
+	if err != nil {
+		return 0, 0, 0, 0
+	}
+	total = len(branches)
+
+	base := g.defaultBranch(branches)
+	skip := map[string]bool{current: true, base: true, localBranchName(base): true}
+
+	var baseCommit *object.Commit
+	if base != "" {
+		if hash, rErr := g.repo.ResolveRevision(plumbing.Revision(base)); rErr == nil {
+			baseCommit, _ = g.repo.CommitObject(*hash)
+		}
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -StaleBranchDays)
+	for _, b := range branches {
+		if skip[b.Name] {
+			continue
+		}
+		if b.Gone {
+			gone++
+		}
+		if !b.LastCommit.IsZero() && b.LastCommit.Before(cutoff) {
+			stale++
+		}
+		if baseCommit == nil {
+			continue
+		}
+		tip, tErr := g.repo.ResolveRevision(plumbing.Revision(b.Name))
+		if tErr != nil {
+			continue
+		}
+		tipCommit, cErr := g.repo.CommitObject(*tip)
+		if cErr != nil {
+			continue
+		}
+		if ok, aErr := tipCommit.IsAncestor(baseCommit); aErr == nil && ok {
+			merged++
+		}
+	}
+	return total, merged, gone, stale
 }
 
 // Branches returns the local branches, most recently committed first, each

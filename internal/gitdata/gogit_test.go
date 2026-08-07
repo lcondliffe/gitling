@@ -234,6 +234,35 @@ func TestGogitBranches(t *testing.T) {
 	}
 }
 
+// TestGogitVitalsNoCommits covers the empty-repository path, where Head()
+// fails and Vitals returns early. The HEAD-independent fields must still be
+// populated: a repo with no commits has a stale threshold and a fetch time
+// like any other, and the shell backend reports them, so reporting 0 and null
+// here would make the two backends disagree on a fresh `git init`.
+func TestGogitVitalsNoCommits(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-q", "-b", "main")
+
+	g, err := openGogit(dir)
+	if err != nil {
+		t.Fatalf("openGogit: %v", err)
+	}
+	v, err := g.Vitals()
+	if err != nil {
+		t.Fatalf("Vitals: %v", err)
+	}
+
+	if v.Branch != "(no commits)" {
+		t.Errorf("Vitals.Branch = %q, want %q", v.Branch, "(no commits)")
+	}
+	if v.StaleAfterDays != StaleBranchDays {
+		t.Errorf("StaleAfterDays = %d, want %d", v.StaleAfterDays, StaleBranchDays)
+	}
+	if v.Operation.InProgress() {
+		t.Errorf("Operation = %+v, want none in progress", v.Operation)
+	}
+}
+
 func TestGogitVitals(t *testing.T) {
 	dir := newFixtureRepo(t)
 	g, err := openGogit(dir)

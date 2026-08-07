@@ -66,15 +66,28 @@ func goldenGrowth() aggregate.Growth {
 	}
 }
 
+// goldenVitals is an ordinary working repo: fetched recently, a little
+// uncommitted work of each kind, an old stash, and a handful of branches that
+// have accumulated cleanup candidates.
 func goldenVitals() gitdata.Vitals {
 	return gitdata.Vitals{
 		Branch:      "main",
 		HasUpstream: true,
 		Ahead:       2,
 		Behind:      1,
+		LastFetch:   goldenNow.Add(-3 * time.Hour),
 		DirtyFiles:  3,
+		Staged:      1,
+		Modified:    1,
+		Untracked:   1,
 		StashCount:  1,
-		BranchCount: 6,
+		OldestStash: goldenNow.AddDate(0, 0, -40),
+
+		BranchCount:    6,
+		MergedBranches: 2,
+		GoneBranches:   1,
+		StaleBranches:  3,
+		StaleAfterDays: gitdata.StaleBranchDays,
 	}
 }
 

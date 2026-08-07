@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,11 @@ type RecentCommit struct {
 	Merge   bool      // whether this is a merge commit
 }
 
+// StaleBranchDays is how long a branch must go without a commit before it
+// counts as stale in Vitals. Long enough that an in-flight feature branch is
+// never flagged, short enough that a forgotten one is.
+const StaleBranchDays = 90
+
 // Vitals captures the current branch / working-tree state. These reflect "now"
 // and are intentionally not cached.
 type Vitals struct {
@@ -71,9 +77,40 @@ type Vitals struct {
 	HasUpstream bool
 	Ahead       int
 	Behind      int
-	DirtyFiles  int
+
+	// Operation is the multi-step git operation the repository is part-way
+	// through, if any (rebase, merge, bisect, ...).
+	Operation Operation
+
+	// LastFetch is when the repository last fetched; the zero time means never
+	// (or not since it was cloned). Ahead/Behind are only as current as this.
+	LastFetch time.Time
+
+	// DirtyFiles is how many entries `git status` reports. The breakdown below
+	// classifies those entries: Conflicts is counted on its own, but Staged and
+	// Modified deliberately overlap, since a file can have both staged and
+	// unstaged changes. Only DirtyFiles is a total.
+	DirtyFiles int
+	Staged     int
+	Modified   int
+	Untracked  int
+	Conflicts  int
+
+	// OldestStash is the author time of the oldest entry on the stash stack;
+	// the zero time when the stack is empty. A stash you made this morning and
+	// one you made last spring want very different reactions.
 	StashCount  int
-	BranchCount int
+	OldestStash time.Time
+
+	// Branch health. Merged/Gone/Stale count local branches that are candidates
+	// for cleanup and exclude the current and default branches, which never
+	// are. The three overlap: a branch can be merged, stale, and have a deleted
+	// upstream all at once. StaleAfterDays reports the threshold Stale used.
+	BranchCount    int
+	MergedBranches int
+	GoneBranches   int
+	StaleBranches  int
+	StaleAfterDays int
 }
 
 // Branch is one local branch's overview state for the branches drill-down.
@@ -98,6 +135,12 @@ type Branch struct {
 // out to the `git` binary for every operation.
 type shellRepo struct {
 	dir string
+
+	// defaultBranch resolves the same way every time within a run but costs up
+	// to three git processes, and both Vitals and Branches want it, so it is
+	// resolved at most once. A Repo is not used concurrently.
+	base     string
+	baseDone bool
 }
 
 // openShell verifies dir is inside a git work tree and returns a shellRepo.
@@ -178,15 +221,161 @@ func (r *shellRepo) Vitals() (Vitals, error) {
 
 	if out, err := r.run("status", "--porcelain"); err == nil {
 		v.DirtyFiles = countLines(out)
+		v.Staged, v.Modified, v.Untracked, v.Conflicts = parseStatusCounts(out)
 	}
-	if out, err := r.run("stash", "list"); err == nil {
-		v.StashCount = countLines(out)
+	// %ct on the stash entries' commits: the stash stack is newest-first, so the
+	// last line is the oldest entry.
+	if out, err := r.run("stash", "list", "--format=%ct"); err == nil {
+		v.StashCount, v.OldestStash = parseStashList(out)
 	}
-	if out, err := r.run("for-each-ref", "--format=%(refname)", "refs/heads"); err == nil {
-		v.BranchCount = countLines(out)
+
+	if dir, err := r.GitDir(); err == nil {
+		v.Operation = detectOperation(dir)
+	}
+	if dir, err := r.commonDir(); err == nil {
+		v.LastFetch = lastFetch(dir)
+	}
+
+	v.StaleAfterDays = StaleBranchDays
+	// One for-each-ref pass covers the branch count plus the "gone" and "stale"
+	// health counts; `git branch --merged` covers the third in one more. Both are
+	// a single git process regardless of how many branches there are, which
+	// matters on the repos where this panel earns its keep.
+	base := r.defaultBranch()
+	skip := map[string]bool{v.Branch: true, base: true, localBranchName(base): true}
+	if out, err := r.run("for-each-ref", "--format=%(refname:short)"+unitSep+"%(upstream:track,nobracket)"+unitSep+"%(committerdate:unix)", "refs/heads"); err == nil {
+		v.BranchCount, v.GoneBranches, v.StaleBranches = parseBranchHealth(out, time.Now(), skip)
+	}
+	if base != "" {
+		// for-each-ref rather than `git branch --merged`: the latter also emits a
+		// pseudo-entry for a detached HEAD ("(HEAD detached at abc1234)"), which
+		// would be counted as a merged branch.
+		if out, err := r.run("for-each-ref", "--merged", base, "--format=%(refname:short)", "refs/heads"); err == nil {
+			v.MergedBranches = countBranchNames(out, skip)
+		}
 	}
 
 	return v, nil
+}
+
+// commonDir returns the absolute path to the repository's common git dir. In a
+// linked worktree this differs from GitDir: per-worktree state (HEAD, an
+// in-progress rebase) lives in the git dir, while shared state (refs, objects,
+// FETCH_HEAD) lives in the common dir.
+func (r *shellRepo) commonDir() (string, error) {
+	out, err := r.run("rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	// git reports this relative to the process's working directory, which is
+	// r.dir, unless it happens to be absolute already.
+	dir := strings.TrimSpace(out)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(r.dir, dir)
+	}
+	return dir, nil
+}
+
+// parseStatusCounts classifies `git status --porcelain` entries by their XY
+// status codes. Conflicted entries are counted only as conflicts; otherwise an
+// entry is counted once for its index state and once for its worktree state, so
+// staged and modified overlap on a file that has both (see Vitals).
+func parseStatusCounts(out string) (staged, modified, untracked, conflicts int) {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		switch {
+		case x == '?' && y == '?':
+			untracked++
+		case isConflict(x, y):
+			conflicts++
+		default:
+			if x != ' ' {
+				staged++
+			}
+			if y != ' ' {
+				modified++
+			}
+		}
+	}
+	return staged, modified, untracked, conflicts
+}
+
+// isConflict reports whether an XY status pair marks an unmerged path. git
+// documents these as the six "U" combinations plus DD and AA.
+func isConflict(x, y byte) bool {
+	return x == 'U' || y == 'U' || (x == 'D' && y == 'D') || (x == 'A' && y == 'A')
+}
+
+// parseStashList reads `git stash list --format=%ct` output, returning the entry
+// count and the timestamp of the oldest entry (zero when the stack is empty).
+func parseStashList(out string) (count int, oldest time.Time) {
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		count++
+		t, err := parseUnix(line)
+		if err != nil {
+			continue
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	return count, oldest
+}
+
+// parseBranchHealth counts local branches from a for-each-ref listing of
+// "<name><unitSep><upstream track><unitSep><committerdate unix>" records. total
+// counts every branch; gone and stale count only cleanup candidates, so
+// branches in skip (the current and default branches) are excluded from those
+// two but still counted in the total.
+func parseBranchHealth(out string, now time.Time, skip map[string]bool) (total, gone, stale int) {
+	cutoff := now.AddDate(0, 0, -StaleBranchDays)
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		f := strings.Split(line, unitSep)
+		if len(f) < 3 {
+			continue
+		}
+		total++
+		if skip[f[0]] {
+			continue
+		}
+		if strings.TrimSpace(f[1]) == "gone" {
+			gone++
+		}
+		if t, err := parseUnix(f[2]); err == nil && t.Before(cutoff) {
+			stale++
+		}
+	}
+	return total, gone, stale
+}
+
+// countBranchNames counts the branch names in a newline-separated listing,
+// ignoring any in skip.
+func countBranchNames(out string, skip map[string]bool) int {
+	count := 0
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || skip[name] {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// localBranchName strips the origin remote prefix off a default-branch ref, so
+// the "origin/main" that defaultBranch resolves to can be matched against the
+// local branch names for-each-ref reports.
+func localBranchName(ref string) string {
+	return strings.TrimPrefix(ref, "origin/")
 }
 
 // Branches returns the local branches, most recently committed first, each with
@@ -233,6 +422,14 @@ func (r *shellRepo) Branches() ([]Branch, error) {
 // defaultBranch resolves the repository's default branch for ahead/behind
 // fallback: the remote's HEAD when known, otherwise a local main/master.
 func (r *shellRepo) defaultBranch() string {
+	if r.baseDone {
+		return r.base
+	}
+	r.base, r.baseDone = r.resolveDefaultBranch(), true
+	return r.base
+}
+
+func (r *shellRepo) resolveDefaultBranch() string {
 	if out, err := r.run("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		if s := strings.TrimSpace(out); s != "" {
 			return s

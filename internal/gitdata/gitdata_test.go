@@ -1,6 +1,7 @@
 package gitdata
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -203,6 +204,146 @@ func TestCountLines(t *testing.T) {
 	for in, want := range cases {
 		if got := countLines(in); got != want {
 			t.Errorf("countLines(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestParseStatusCounts(t *testing.T) {
+	// One file staged only, one modified only, one both, one untracked, one
+	// conflicted, one deleted from the index.
+	out := "M  staged.go\n" +
+		" M modified.go\n" +
+		"MM both.go\n" +
+		"?? new.go\n" +
+		"UU conflict.go\n" +
+		"D  gone.go\n"
+
+	staged, modified, untracked, conflicts := parseStatusCounts(out)
+	// both.go counts once as staged and once as modified: the two overlap by
+	// design, which is why only DirtyFiles is treated as a total.
+	if staged != 3 {
+		t.Errorf("staged = %d, want 3", staged)
+	}
+	if modified != 2 {
+		t.Errorf("modified = %d, want 2", modified)
+	}
+	if untracked != 1 {
+		t.Errorf("untracked = %d, want 1", untracked)
+	}
+	if conflicts != 1 {
+		t.Errorf("conflicts = %d, want 1", conflicts)
+	}
+}
+
+func TestParseStatusCountsEmpty(t *testing.T) {
+	staged, modified, untracked, conflicts := parseStatusCounts("")
+	if staged+modified+untracked+conflicts != 0 {
+		t.Errorf("clean tree counted %d %d %d %d, want all zero", staged, modified, untracked, conflicts)
+	}
+}
+
+func TestIsConflict(t *testing.T) {
+	// Every unmerged combination git documents, plus near misses that are not.
+	conflicted := []string{"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
+	for _, c := range conflicted {
+		if !isConflict(c[0], c[1]) {
+			t.Errorf("isConflict(%q) = false, want true", c)
+		}
+	}
+	for _, c := range []string{"M ", " M", "MM", "??", "A ", "D ", "R "} {
+		if isConflict(c[0], c[1]) {
+			t.Errorf("isConflict(%q) = true, want false", c)
+		}
+	}
+}
+
+func TestParseStashList(t *testing.T) {
+	// Newest first, the order `git stash list` uses.
+	count, oldest := parseStashList("1700200000\n1700100000\n1700000000\n")
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+	if !oldest.Equal(time.Unix(1700000000, 0)) {
+		t.Errorf("oldest = %v, want %v", oldest, time.Unix(1700000000, 0))
+	}
+}
+
+func TestParseStashListEmpty(t *testing.T) {
+	count, oldest := parseStashList("")
+	if count != 0 || !oldest.IsZero() {
+		t.Errorf("parseStashList(\"\") = (%d, %v), want (0, zero time)", count, oldest)
+	}
+}
+
+func TestParseBranchHealth(t *testing.T) {
+	const us = "\x1f"
+	now := time.Unix(1700000000, 0)
+	old := now.AddDate(0, 0, -StaleBranchDays-1).Unix()
+	recent := now.AddDate(0, 0, -1).Unix()
+
+	line := func(name, track string, when int64) string {
+		return strings.Join([]string{name, track, strconv.FormatInt(when, 10)}, us)
+	}
+	out := strings.Join([]string{
+		line("main", "", recent),           // default branch: never a candidate
+		line("feature", "ahead 2", recent), // live work
+		line("old-feature", "", old),       // stale
+		line("dropped", "gone", old),       // stale and gone
+		line("dropped-2", "gone", recent),  // gone but recent
+		line("legacy", "", old),            // stale
+	}, "\n")
+
+	skip := map[string]bool{"main": true}
+	total, gone, stale := parseBranchHealth(out, now, skip)
+	if total != 6 {
+		t.Errorf("total = %d, want 6", total)
+	}
+	if gone != 2 {
+		t.Errorf("gone = %d, want 2", gone)
+	}
+	if stale != 3 {
+		t.Errorf("stale = %d, want 3", stale)
+	}
+}
+
+// A branch old enough to be stale is still not a cleanup candidate when it is
+// the one you are standing on, or the default branch.
+func TestParseBranchHealthSkipsProtectedBranches(t *testing.T) {
+	const us = "\x1f"
+	now := time.Unix(1700000000, 0)
+	old := strconv.FormatInt(now.AddDate(0, 0, -365).Unix(), 10)
+	out := strings.Join([]string{"main", "gone", old}, us) + "\n" +
+		strings.Join([]string{"wip", "gone", old}, us)
+
+	total, gone, stale := parseBranchHealth(out, now, map[string]bool{"main": true, "wip": true})
+	if total != 2 {
+		t.Errorf("total = %d, want 2", total)
+	}
+	if gone != 0 || stale != 0 {
+		t.Errorf("gone/stale = %d/%d, want 0/0", gone, stale)
+	}
+}
+
+func TestCountBranchNames(t *testing.T) {
+	skip := map[string]bool{"main": true}
+	if got := countBranchNames("main\nfeature\nchore/tidy\n", skip); got != 2 {
+		t.Errorf("countBranchNames = %d, want 2", got)
+	}
+	if got := countBranchNames("", skip); got != 0 {
+		t.Errorf("countBranchNames(\"\") = %d, want 0", got)
+	}
+}
+
+func TestLocalBranchName(t *testing.T) {
+	cases := map[string]string{
+		"origin/main":    "main",
+		"main":           "main",
+		"origin/release": "release",
+		"":               "",
+	}
+	for in, want := range cases {
+		if got := localBranchName(in); got != want {
+			t.Errorf("localBranchName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

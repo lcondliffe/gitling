@@ -21,16 +21,7 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 	out := jsonModel{
 		Range:       m.RangeLabel,
 		GeneratedAt: m.Now.Format(time.RFC3339),
-		Vitals: jsonVitals{
-			Branch:      m.Vitals.Branch,
-			Detached:    m.Vitals.Detached,
-			HasUpstream: m.Vitals.HasUpstream,
-			Ahead:       m.Vitals.Ahead,
-			Behind:      m.Vitals.Behind,
-			DirtyFiles:  m.Vitals.DirtyFiles,
-			StashCount:  m.Vitals.StashCount,
-			BranchCount: m.Vitals.BranchCount,
-		},
+		Vitals:      jsonVitalsOf(m.Vitals),
 		Activity: jsonActivity{
 			Days:         jsonDays(m.Days),
 			TotalCommits: m.TotalCommits,
@@ -77,15 +68,82 @@ type jsonRecent struct {
 	Merge   bool   `json:"merge"`
 }
 
+// jsonVitals mirrors gitdata.Vitals. Timestamps and the in-progress operation
+// are pointers so "never fetched", "no stashes", and "nothing in progress" come
+// through as null rather than as a zero date or an empty object.
 type jsonVitals struct {
-	Branch      string `json:"branch"`
-	Detached    bool   `json:"detached"`
-	HasUpstream bool   `json:"has_upstream"`
-	Ahead       int    `json:"ahead"`
-	Behind      int    `json:"behind"`
-	DirtyFiles  int    `json:"dirty_files"`
-	StashCount  int    `json:"stash_count"`
-	BranchCount int    `json:"branch_count"`
+	Branch      string         `json:"branch"`
+	Detached    bool           `json:"detached"`
+	HasUpstream bool           `json:"has_upstream"`
+	Ahead       int            `json:"ahead"`
+	Behind      int            `json:"behind"`
+	Operation   *jsonOperation `json:"operation"`
+	LastFetch   *string        `json:"last_fetch"`
+
+	// staged/modified overlap; only dirty_files is a total (see gitdata.Vitals).
+	DirtyFiles int `json:"dirty_files"`
+	Staged     int `json:"staged"`
+	Modified   int `json:"modified"`
+	Untracked  int `json:"untracked"`
+	Conflicts  int `json:"conflicts"`
+
+	StashCount  int     `json:"stash_count"`
+	OldestStash *string `json:"oldest_stash"`
+
+	BranchCount    int `json:"branch_count"`
+	MergedBranches int `json:"merged_branches"`
+	GoneBranches   int `json:"gone_branches"`
+	StaleBranches  int `json:"stale_branches"`
+	StaleAfterDays int `json:"stale_after_days"`
+}
+
+// jsonOperation is an in-progress multi-step git operation. step/total are null
+// when the operation isn't one git tracks a position for.
+type jsonOperation struct {
+	Kind  string `json:"kind"`
+	Step  *int   `json:"step"`
+	Total *int   `json:"total"`
+}
+
+func jsonVitalsOf(v gitdata.Vitals) jsonVitals {
+	out := jsonVitals{
+		Branch:         v.Branch,
+		Detached:       v.Detached,
+		HasUpstream:    v.HasUpstream,
+		Ahead:          v.Ahead,
+		Behind:         v.Behind,
+		LastFetch:      jsonTime(v.LastFetch),
+		DirtyFiles:     v.DirtyFiles,
+		Staged:         v.Staged,
+		Modified:       v.Modified,
+		Untracked:      v.Untracked,
+		Conflicts:      v.Conflicts,
+		StashCount:     v.StashCount,
+		OldestStash:    jsonTime(v.OldestStash),
+		BranchCount:    v.BranchCount,
+		MergedBranches: v.MergedBranches,
+		GoneBranches:   v.GoneBranches,
+		StaleBranches:  v.StaleBranches,
+		StaleAfterDays: v.StaleAfterDays,
+	}
+	if v.Operation.InProgress() {
+		op := jsonOperation{Kind: v.Operation.Kind}
+		if v.Operation.Total > 0 {
+			step, total := v.Operation.Step, v.Operation.Total
+			op.Step, op.Total = &step, &total
+		}
+		out.Operation = &op
+	}
+	return out
+}
+
+// jsonTime renders t as RFC 3339, or null for the zero time.
+func jsonTime(t time.Time) *string {
+	if t.IsZero() {
+		return nil
+	}
+	s := t.Format(time.RFC3339)
+	return &s
 }
 
 type jsonActivity struct {
