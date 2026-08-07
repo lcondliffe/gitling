@@ -121,11 +121,28 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		opts.width = width
 	}
 
-	if err := tidyRun(stdout, stdin, opts); err != nil {
+	repo, err := gitdata.Open(".")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		return 1
+	}
+
+	if err := tidyRun(stdout, os.Stderr, stdin, repo, opts); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		return 1
 	}
 	return 0
+}
+
+// tidyRepo is the part of a repository tidy uses. It is declared here, at the
+// consumer, so it stays narrow: three reads and the one call that deletes.
+// Opening the real repository is runTidy's job, which leaves tidyRun — the
+// confirmation gate and the delete loop — drivable by a fake.
+type tidyRepo interface {
+	Branches() ([]gitdata.Branch, error)
+	DefaultBranch() string
+	Fetch(prune bool) error
+	DeleteBranch(name string, force bool) error
 }
 
 // selection is which categories are in play, and the stale threshold.
@@ -162,12 +179,7 @@ func tidySelection(merged, gone bool, stale staleFlag) (selection, error) {
 	return sel, nil
 }
 
-func tidyRun(stdout io.Writer, stdin io.Reader, o tidyOptions) error {
-	repo, err := gitdata.Open(".")
-	if err != nil {
-		return err
-	}
-
+func tidyRun(stdout, stderr io.Writer, stdin io.Reader, repo tidyRepo, o tidyOptions) error {
 	// Fetch first: Branch.Gone is derived from remote-tracking refs, so without
 	// a pruning fetch a branch deleted on the forge months ago still looks
 	// alive and the most useful category comes back empty. A failure here is
@@ -176,8 +188,8 @@ func tidyRun(stdout io.Writer, stdin io.Reader, o tidyOptions) error {
 	// then built on stale information.
 	if o.fetch {
 		if err := repo.Fetch(true); err != nil {
-			fmt.Fprintln(os.Stderr, "gitling: warning: fetch failed, working from local refs:", err)
-			fmt.Fprintln(os.Stderr, "gitling: warning: branches deleted on the remote may not show as gone")
+			fmt.Fprintln(stderr, "gitling: warning: fetch failed, working from local refs:", err)
+			fmt.Fprintln(stderr, "gitling: warning: branches deleted on the remote may not show as gone")
 		}
 	}
 
@@ -227,7 +239,7 @@ func tidyRun(stdout io.Writer, stdin io.Reader, o tidyOptions) error {
 // deleteBranches applies the plan, returning the branches that could not be
 // deleted and why. One failure does not stop the rest: a branch git refuses is
 // information, not a reason to leave the remaining cleanup half done.
-func deleteBranches(repo *gitdata.Repo, plan tidy.Plan) map[string]error {
+func deleteBranches(repo tidyRepo, plan tidy.Plan) map[string]error {
 	failed := map[string]error{}
 	for _, c := range plan.Candidates {
 		if err := repo.DeleteBranch(c.Branch.Name, c.Force); err != nil {
