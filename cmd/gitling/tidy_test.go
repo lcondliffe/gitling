@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"io"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -265,5 +267,19 @@ func TestPluralBranches(t *testing.T) {
 		if got := pluralBranches(n); got != want {
 			t.Errorf("pluralBranches(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+func TestRunTidyRejectsMalformedProtectGlob(t *testing.T) {
+	var out bytes.Buffer
+	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--protect", "[bad"}); got != 2 {
+		t.Errorf("runTidy with a malformed glob = %d, want 2", got)
+	}
+}
+
+func TestRunTidyAcceptsValidProtectGlob(t *testing.T) {
+	var out bytes.Buffer
+	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--protect", "release/*"}); got != 0 {
+		t.Errorf("runTidy with a valid glob = %d, want 0", got)
 	}
 }

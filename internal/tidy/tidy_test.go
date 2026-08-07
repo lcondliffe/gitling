@@ -205,12 +205,16 @@ func TestClassifyProtectGlobs(t *testing.T) {
 	}
 }
 
-// A malformed glob must not silently protect (or delete) everything.
-func TestClassifyIgnoresMalformedGlob(t *testing.T) {
+// A glob that cannot be evaluated must keep the branch, not expose it. The
+// command layer rejects malformed patterns up front; this is the backstop.
+func TestClassifyKeepsBranchesUnderMalformedGlob(t *testing.T) {
 	plan := Classify([]gitdata.Branch{branch("chore/tidy", merged)},
 		Options{Base: "main", Protect: []string{"[bad"}, Now: now})
-	if want := []string{"chore/tidy"}; !equal(names(plan.Candidates), want) {
-		t.Errorf("candidates = %v, want %v", names(plan.Candidates), want)
+	if len(plan.Candidates) != 0 {
+		t.Errorf("candidates = %v, want none: a branch must not become deletable because its protect pattern is unusable", names(plan.Candidates))
+	}
+	if len(plan.Protected) != 1 || plan.Protected[0].Why != "unusable protect pattern [bad" {
+		t.Errorf("Protected = %+v, want the branch kept with a reason naming the pattern", plan.Protected)
 	}
 }
 

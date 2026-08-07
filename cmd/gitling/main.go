@@ -42,6 +42,16 @@ func buildVersion() string {
 
 func main() {
 	args := os.Args[1:]
+	// tidy is handled apart from the dashboard views: it is the only subcommand
+	// that writes, so it gets its own flag set rather than sharing one with the
+	// read-only views (see runTidy). It also loads the config itself, since it
+	// needs the protect list that nothing else uses. Checked before any
+	// drill-down is stripped, so `gitling graph tidy` stays an error rather
+	// than silently running the mutating command.
+	if len(args) > 0 && args[0] == "tidy" {
+		os.Exit(runTidy(os.Stdout, os.Stdin, args[1:]))
+	}
+
 	// Every drill-down named on the command line (subcommand or flag) is
 	// collected here; asking for two different ones is an error.
 	var requested []string
@@ -52,14 +62,6 @@ func main() {
 			requested = append(requested, v)
 			args = args[1:]
 		}
-	}
-
-	// tidy is handled apart from the dashboard views: it is the only subcommand
-	// that writes, so it gets its own flag set rather than sharing one with the
-	// read-only views (see runTidy). It also loads the config itself, since it
-	// needs the protect list that nothing else uses.
-	if len(args) > 0 && args[0] == "tidy" {
-		os.Exit(runTidy(os.Stdout, os.Stdin, args[1:]))
 	}
 
 	noColor := flag.Bool("no-color", false, "disable ANSI color output (alias for --color=never)")

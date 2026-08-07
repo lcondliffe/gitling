@@ -189,7 +189,13 @@ func protectedBecause(b gitdata.Branch, opts Options) (why string, report bool) 
 		return "checked out", true
 	}
 	for _, pattern := range opts.Protect {
-		if ok, err := path.Match(pattern, b.Name); err == nil && ok {
+		ok, err := path.Match(pattern, b.Name)
+		if err != nil {
+			// An unusable pattern can't be evaluated, so keep the branch
+			// rather than delete one the user meant to protect.
+			return "unusable protect pattern " + pattern, true
+		}
+		if ok {
 			return "protected by " + pattern, true
 		}
 	}

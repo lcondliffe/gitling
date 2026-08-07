@@ -79,7 +79,7 @@ func Tidy(w io.Writer, m TidyModel, color bool) {
 			// The flag is the honest signal of how much git itself vouches for
 			// the deletion, so it keeps its own colour and is never the part
 			// that gets cut.
-			if width := m.Width - 4 - runeLen(flag); width > 0 && runeLen(heading) > width {
+			if width := m.Width - 5 - runeLen(flag); width > 0 && runeLen(heading) > width {
 				heading = truncate(heading, width)
 			}
 			fmt.Fprintln(w, "  "+p.c(cLabel, heading)+"   "+p.tidyFlag(c.Force))

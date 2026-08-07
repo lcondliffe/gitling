@@ -15,7 +15,9 @@ package gitdata
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -67,6 +69,10 @@ type RecentCommit struct {
 // StaleBranchDays is how long a branch must go without a commit before it
 // counts as stale in Vitals. Long enough that an in-flight feature branch is
 // never flagged, short enough that a forgotten one is.
+// fetchTimeout bounds the pruning fetch so an unreachable remote degrades
+// instead of hanging.
+const fetchTimeout = 60 * time.Second
+
 const StaleBranchDays = 90
 
 // Vitals captures the current branch / working-tree state. These reflect "now"
@@ -161,8 +167,15 @@ func openShell(dir string) (*shellRepo, error) {
 }
 
 func (r *shellRepo) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return r.runContext(context.Background(), args...)
+}
+
+// runContext runs git under ctx with interactive prompts disabled: gitling is
+// a reporting tool, so a credential prompt would hang it with no way to answer.
+func (r *shellRepo) runContext(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -540,7 +553,11 @@ func (r *shellRepo) Fetch(prune bool) error {
 	if prune {
 		args = append(args, "--prune")
 	}
-	_, err := r.run(args...)
+	// The only command here that touches the network, so the only one that can
+	// hang on an unreachable remote. Callers treat a failure as degraded.
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	_, err := r.runContext(ctx, args...)
 	return err
 }
 

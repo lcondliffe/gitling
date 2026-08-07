@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -92,6 +93,14 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		return 2
 	}
 
+	protectGlobs := append(append([]string{}, cfg.Protect...), protect...)
+	for _, pattern := range protectGlobs {
+		if _, err := path.Match(pattern, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "gitling: invalid --protect pattern %q\n", pattern)
+			return 2
+		}
+	}
+
 	sel, err := tidySelection(*merged, *gone, *stale)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
@@ -101,7 +110,7 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 	opts := tidyOptions{
 		reasons:    sel.reasons,
 		staleAfter: sel.staleAfter,
-		protect:    append(append([]string{}, cfg.Protect...), protect...),
+		protect:    protectGlobs,
 		apply:      *apply,
 		assumeYes:  *assumeYes,
 		fetch:      !*noFetch,
@@ -217,6 +226,9 @@ func tidyRun(stdout io.Writer, stdin io.Reader, o tidyOptions) error {
 	model.Applied = true
 	model.Failed = deleteBranches(repo, plan)
 	render.Tidy(stdout, model, o.color)
+	if n := len(model.Failed); n > 0 {
+		return fmt.Errorf("%d %s could not be deleted", n, pluralBranches(n))
+	}
 	return nil
 }
 
