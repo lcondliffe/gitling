@@ -205,6 +205,20 @@ func TestClassifyProtectGlobs(t *testing.T) {
 	}
 }
 
+// git refuses to delete a branch checked out in any worktree, not just this one.
+func TestClassifyProtectsBranchesInOtherWorktrees(t *testing.T) {
+	b := branch("chore/elsewhere", merged)
+	b.Worktree = "/tmp/wt/chore-elsewhere"
+	plan := Classify([]gitdata.Branch{b}, Options{Base: "main", Now: now})
+
+	if len(plan.Candidates) != 0 {
+		t.Errorf("candidates = %v, want none", names(plan.Candidates))
+	}
+	if len(plan.Protected) != 1 || plan.Protected[0].Why != "checked out at /tmp/wt/chore-elsewhere" {
+		t.Errorf("Protected = %+v, want the worktree path as the reason", plan.Protected)
+	}
+}
+
 // A glob that cannot be evaluated must keep the branch, not expose it. The
 // command layer rejects malformed patterns up front; this is the backstop.
 func TestClassifyKeepsBranchesUnderMalformedGlob(t *testing.T) {

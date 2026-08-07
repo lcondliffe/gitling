@@ -402,3 +402,34 @@ func TestIntegrationOpenRejectsNonRepo(t *testing.T) {
 		t.Error("Open on a non-repository should fail")
 	}
 }
+
+// git refuses to delete a branch checked out in another worktree, so Branches
+// must report where it is checked out.
+func TestIntegrationBranchInOtherWorktree(t *testing.T) {
+	f := newFixture(t)
+
+	gitCmd(t, f.local, "checkout", "-q", "-b", "in-worktree")
+	commitFile(t, f.local, "w.txt", "w\n", "worktree work", time.Time{})
+	gitCmd(t, f.local, "checkout", "-q", "main")
+	gitCmd(t, f.local, "merge", "-q", "--no-ff", "-m", "merge", "in-worktree")
+
+	wt := filepath.Join(t.TempDir(), "linked")
+	gitCmd(t, f.local, "worktree", "add", "-q", wt, "in-worktree")
+
+	r := f.repo(t)
+	got := branchesByName(t, r)["in-worktree"]
+	if got.Worktree == "" {
+		t.Fatal("Worktree not reported for a branch checked out in a linked worktree")
+	}
+	if !got.Merged {
+		t.Error("precondition: the branch should still read as merged")
+	}
+
+	// Merged, so tidy would otherwise offer it for a plain -d.
+	if err := r.DeleteBranch("in-worktree", false); err == nil {
+		t.Error("deleting a branch checked out in another worktree should be refused")
+	}
+	if !localBranchExists(t, f.local, "in-worktree") {
+		t.Error("branch was deleted despite being checked out elsewhere")
+	}
+}

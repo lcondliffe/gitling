@@ -188,6 +188,11 @@ func protectedBecause(b gitdata.Branch, opts Options) (why string, report bool) 
 	if b.IsHead {
 		return "checked out", true
 	}
+	// Checked out in another worktree: git refuses to delete it there just as
+	// it does here, so it was never a real candidate.
+	if b.Worktree != "" {
+		return "checked out at " + b.Worktree, true
+	}
 	for _, pattern := range opts.Protect {
 		ok, err := path.Match(pattern, b.Name)
 		if err != nil {

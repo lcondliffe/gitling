@@ -127,7 +127,11 @@ type Branch struct {
 	Merged bool
 	// Tip is the full hash the branch points at. Recorded so a deleted branch
 	// can be restored with `git branch <name> <tip>`.
-	Tip        string
+	Tip string
+	// Worktree is the path of the worktree this branch is checked out in, or
+	// empty when it is not checked out anywhere. git refuses to delete such a
+	// branch, in any worktree, not just the current one.
+	Worktree   string
 	Ahead      int       // commits on this branch not on CompareRef
 	Behind     int       // commits on CompareRef not on this branch
 	HasCompare bool      // whether Ahead/Behind (and CompareRef) are populated
@@ -401,7 +405,7 @@ func (r *Repo) Branches() ([]Branch, error) {
 	format := strings.Join([]string{
 		"%(HEAD)", "%(refname:short)", "%(upstream:short)",
 		"%(upstream:track,nobracket)", "%(committerdate:unix)", "%(authorname)",
-		"%(objectname)",
+		"%(objectname)", "%(worktreepath)",
 	}, unitSep)
 	out, err := r.run("for-each-ref", "--sort=-committerdate", "--format="+format, "refs/heads")
 	if err != nil {
@@ -490,6 +494,9 @@ func parseBranches(out string) []Branch {
 		}
 		if len(f) > 6 {
 			b.Tip = strings.TrimSpace(f[6])
+		}
+		if len(f) > 7 {
+			b.Worktree = strings.TrimSpace(f[7])
 		}
 		switch track := strings.TrimSpace(f[3]); {
 		case track == "gone":

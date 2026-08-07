@@ -184,6 +184,22 @@ func TestParseBranchesShortRecords(t *testing.T) {
 		}
 	})
 
+	t.Run("seven fields leave Worktree empty", func(t *testing.T) {
+		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", "abc123"}, us)
+		got := parseBranches(line + "\n")
+		if len(got) != 1 || got[0].Worktree != "" {
+			t.Fatalf("got %+v, want an empty Worktree", got)
+		}
+	})
+
+	t.Run("worktree path is parsed", func(t *testing.T) {
+		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", "abc123", "/tmp/wt"}, us)
+		got := parseBranches(line + "\n")
+		if len(got) != 1 || got[0].Worktree != "/tmp/wt" {
+			t.Fatalf("got %+v, want Worktree /tmp/wt", got)
+		}
+	})
+
 	t.Run("tip is trimmed", func(t *testing.T) {
 		line := strings.Join([]string{" ", "feature", "", "", "1700000000", "Ada", " abc123 "}, us)
 		got := parseBranches(line + "\n")
