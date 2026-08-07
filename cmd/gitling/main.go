@@ -42,6 +42,16 @@ func buildVersion() string {
 
 func main() {
 	args := os.Args[1:]
+	// tidy is handled apart from the dashboard views: it is the only subcommand
+	// that writes, so it gets its own flag set rather than sharing one with the
+	// read-only views (see runTidy). It also loads the config itself, since it
+	// needs the protect list that nothing else uses. Checked before any
+	// drill-down is stripped, so `gitling graph tidy` stays an error rather
+	// than silently running the mutating command.
+	if len(args) > 0 && args[0] == "tidy" {
+		os.Exit(runTidy(os.Stdout, os.Stdin, args[1:]))
+	}
+
 	// Every drill-down named on the command line (subcommand or flag) is
 	// collected here; asking for two different ones is an error.
 	var requested []string
@@ -192,6 +202,7 @@ Usage:
   gitling churn [flags]
   gitling contributors [flags]
   gitling branches [flags]
+  gitling tidy [flags]
 
 Flags:
   --since <dur>    time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
@@ -209,6 +220,10 @@ Flags:
   --config <path>  path to config file (default $XDG_CONFIG_HOME/gitling/config.json
                     or ~/.config/gitling/config.json; $GITLING_CONFIG overrides)
   --version        print version and exit
+
+The tidy subcommand cleans up local branches you're done with and takes its
+own flags; run "gitling tidy --help" for those. It is a dry run unless you
+pass --apply, and it is the only subcommand that changes anything.
 
 Config file (optional, JSON) may set defaults for "since", "color", "bucket",
 "recent", and "layout"; command-line flags always override it. --no-color

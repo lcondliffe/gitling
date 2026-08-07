@@ -18,6 +18,12 @@ type config struct {
 	// Recent is a pointer so that an explicit 0 (hide the recent panel) is
 	// distinguishable from the key being absent.
 	Recent *int `json:"recent"`
+	// Protect lists branch-name globs `gitling tidy` must never delete. Unlike
+	// the other keys this one isn't a default that a flag overrides: --protect
+	// adds to it, because a config file saying "never delete release/*" should
+	// not be silently switched off by naming one more pattern on the command
+	// line.
+	Protect []string `json:"protect"`
 }
 
 // configPath resolves the config file location, in priority order:
@@ -40,6 +46,16 @@ func configPath(flagPath string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "gitling", "config.json"), nil
+}
+
+// loadConfigForRun resolves the config location for one run (honoring an
+// explicit --config value) and loads it.
+func loadConfigForRun(flagPath string) (config, error) {
+	path, err := configPath(flagPath)
+	if err != nil {
+		return config{}, err
+	}
+	return loadConfig(path)
 }
 
 // loadConfig reads and parses the config file at path. A missing file is not

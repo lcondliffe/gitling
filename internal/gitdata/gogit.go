@@ -120,11 +120,8 @@ func (g *gogitRepo) IsAncestor(maybeAncestor, descendant string) bool {
 func (g *gogitRepo) Vitals() (Vitals, error) {
 	var v Vitals
 
-	// Everything here is independent of HEAD: a repository with no commits
-	// still has a git dir, a last-fetch time, and the same stale threshold.
-	// Set before the no-commits early return below, so an empty repo reports
-	// the same values the shell backend gives it rather than a null fetch
-	// time and a zero threshold.
+	// Independent of HEAD: an empty repo still has a git dir, a fetch time and
+	// the same stale threshold, and the shell backend reports them.
 	v.StaleAfterDays = StaleBranchDays
 	if dir, dErr := g.GitDir(); dErr == nil {
 		v.Operation = detectOperation(dir)
@@ -214,9 +211,10 @@ func (g *gogitRepo) branchCount() (int, error) {
 // checked-out branch, which — along with the default branch — is excluded from
 // the candidate counts.
 //
-// Where shell-out gets "merged" from a single `git branch --merged`, this walks
-// history once per branch to test ancestry, so it is O(branches x history);
-// see the gogitRepo type comment on why that trade is acceptable here.
+// Where shell-out gets "merged" from a single `git for-each-ref --merged`,
+// Branches walks history once per branch to test ancestry, so this is
+// O(branches x history); see the gogitRepo type comment on why that trade is
+// acceptable here.
 func (g *gogitRepo) branchHealth(current string) (total, merged, gone, stale int) {
 	branches, err := g.Branches()
 	if err != nil {
@@ -225,39 +223,21 @@ func (g *gogitRepo) branchHealth(current string) (total, merged, gone, stale int
 	total = len(branches)
 
 	base := g.defaultBranch(branches)
-	skip := map[string]bool{current: true, base: true, localBranchName(base): true}
-
-	var baseCommit *object.Commit
-	if base != "" {
-		if hash, rErr := g.repo.ResolveRevision(plumbing.Revision(base)); rErr == nil {
-			baseCommit, _ = g.repo.CommitObject(*hash)
-		}
-	}
+	skip := map[string]bool{current: true, base: true, LocalBranchName(base): true}
 
 	cutoff := time.Now().AddDate(0, 0, -StaleBranchDays)
 	for _, b := range branches {
 		if skip[b.Name] {
 			continue
 		}
+		if b.Merged {
+			merged++
+		}
 		if b.Gone {
 			gone++
 		}
 		if !b.LastCommit.IsZero() && b.LastCommit.Before(cutoff) {
 			stale++
-		}
-		if baseCommit == nil {
-			continue
-		}
-		tip, tErr := g.repo.ResolveRevision(plumbing.Revision(b.Name))
-		if tErr != nil {
-			continue
-		}
-		tipCommit, cErr := g.repo.CommitObject(*tip)
-		if cErr != nil {
-			continue
-		}
-		if ok, aErr := tipCommit.IsAncestor(baseCommit); aErr == nil && ok {
-			merged++
 		}
 	}
 	return total, merged, gone, stale
@@ -284,6 +264,7 @@ func (g *gogitRepo) Branches() ([]Branch, error) {
 		b := Branch{
 			Name:   name,
 			IsHead: ref.Name() == headName,
+			Tip:    ref.Hash().String(),
 		}
 		if commit, cErr := g.repo.CommitObject(ref.Hash()); cErr == nil {
 			b.LastCommit = commit.Committer.When
@@ -316,8 +297,16 @@ func (g *gogitRepo) Branches() ([]Branch, error) {
 
 	if base := g.defaultBranch(branches); base != "" {
 		if baseHash, bErr := g.repo.ResolveRevision(plumbing.Revision(base)); bErr == nil {
+			baseCommit, _ := g.repo.CommitObject(*baseHash)
 			for i := range branches {
 				bb := &branches[i]
+				if baseCommit != nil {
+					if tip, tErr := g.repo.ResolveRevision(plumbing.Revision(bb.Name)); tErr == nil {
+						if tipCommit, cErr := g.repo.CommitObject(*tip); cErr == nil {
+							bb.Merged, _ = tipCommit.IsAncestor(baseCommit)
+						}
+					}
+				}
 				if bb.HasCompare || bb.Gone || bb.Name == base {
 					continue
 				}
@@ -356,6 +345,25 @@ func (g *gogitRepo) defaultBranch(branches []Branch) string {
 	}
 	return ""
 }
+
+// DefaultBranch returns the repository's default branch ref.
+func (g *gogitRepo) DefaultBranch() string {
+	branches, err := g.Branches()
+	if err != nil {
+		return ""
+	}
+	return g.defaultBranch(branches)
+}
+
+// errReadOnly is returned by the mutating Backend methods under this backend.
+// Refusing is deliberate: deleting branches and fetching are the two operations
+// where being wrong costs something, and go-git's fetch has its own credential
+// handling that would diverge from the user's configured git. Analysis works
+// under either backend; `gitling tidy` wants the real thing.
+var errReadOnly = fmt.Errorf("gogit: this build is read-only; rebuild without -tags gogit to use tidy")
+
+func (g *gogitRepo) Fetch(bool) error                { return errReadOnly }
+func (g *gogitRepo) DeleteBranch(string, bool) error { return errReadOnly }
 
 // Commits returns non-merge commits in revRange ("" = full history, or
 // "hash..HEAD" for an incremental walk), with numstat-equivalent per-commit

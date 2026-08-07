@@ -147,7 +147,8 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig(missing) error: %v", err)
 	}
-	if cfg != (config{}) {
+	if cfg.Since != "" || cfg.Color != "" || cfg.Bucket != "" || cfg.Layout != "" ||
+		cfg.Recent != nil || len(cfg.Protect) != 0 {
 		t.Errorf("loadConfig(missing) = %+v, want zero value", cfg)
 	}
 
@@ -160,8 +161,21 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig(valid) error: %v", err)
 	}
-	if want := (config{Since: "30d", Color: "always", Bucket: "week", Layout: "wide"}); cfg != want {
-		t.Errorf("loadConfig(valid) = %+v, want %+v", cfg, want)
+	if cfg.Since != "30d" || cfg.Color != "always" || cfg.Bucket != "week" || cfg.Layout != "wide" {
+		t.Errorf("loadConfig(valid) = %+v", cfg)
+	}
+
+	// The tidy protect list parses as a string slice.
+	protect := filepath.Join(dir, "protect.json")
+	if err := os.WriteFile(protect, []byte(`{"protect":["release/*","main"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadConfig(protect)
+	if err != nil {
+		t.Fatalf("loadConfig(protect) error: %v", err)
+	}
+	if len(cfg.Protect) != 2 || cfg.Protect[0] != "release/*" || cfg.Protect[1] != "main" {
+		t.Errorf("loadConfig(protect).Protect = %#v", cfg.Protect)
 	}
 
 	// Unknown keys are ignored.

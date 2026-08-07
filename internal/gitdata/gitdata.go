@@ -15,7 +15,9 @@ package gitdata
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -67,6 +69,10 @@ type RecentCommit struct {
 // StaleBranchDays is how long a branch must go without a commit before it
 // counts as stale in Vitals. Long enough that an in-flight feature branch is
 // never flagged, short enough that a forgotten one is.
+// fetchTimeout bounds the pruning fetch so an unreachable remote degrades
+// instead of hanging.
+const fetchTimeout = 60 * time.Second
+
 const StaleBranchDays = 90
 
 // Vitals captures the current branch / working-tree state. These reflect "now"
@@ -118,10 +124,18 @@ type Vitals struct {
 // what they are measured against (the branch's upstream, or the default branch
 // as a fallback for branches with no upstream configured).
 type Branch struct {
-	Name       string
-	IsHead     bool      // the currently checked-out branch
-	Upstream   string    // tracking ref (short), empty when none is configured
-	Gone       bool      // upstream configured but no longer exists
+	Name     string
+	IsHead   bool   // the currently checked-out branch
+	Upstream string // tracking ref (short), empty when none is configured
+	Gone     bool   // upstream configured but no longer exists
+	// Merged reports whether the tip is an ancestor of the repository's default
+	// branch. Note this is false for squash- and rebase-merged branches, whose
+	// commits landed as new objects — for those, Gone is the signal that the
+	// work is in.
+	Merged bool
+	// Tip is the full hash the branch points at. Recorded so a deleted branch
+	// can be restored with `git branch <name> <tip>`.
+	Tip        string
 	Ahead      int       // commits on this branch not on CompareRef
 	Behind     int       // commits on CompareRef not on this branch
 	HasCompare bool      // whether Ahead/Behind (and CompareRef) are populated
@@ -153,8 +167,15 @@ func openShell(dir string) (*shellRepo, error) {
 }
 
 func (r *shellRepo) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return r.runContext(context.Background(), args...)
+}
+
+// runContext runs git under ctx with interactive prompts disabled: gitling is
+// a reporting tool, so a credential prompt would hang it with no way to answer.
+func (r *shellRepo) runContext(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -242,7 +263,7 @@ func (r *shellRepo) Vitals() (Vitals, error) {
 	// a single git process regardless of how many branches there are, which
 	// matters on the repos where this panel earns its keep.
 	base := r.defaultBranch()
-	skip := map[string]bool{v.Branch: true, base: true, localBranchName(base): true}
+	skip := map[string]bool{v.Branch: true, base: true, LocalBranchName(base): true}
 	if out, err := r.run("for-each-ref", "--format=%(refname:short)"+unitSep+"%(upstream:track,nobracket)"+unitSep+"%(committerdate:unix)", "refs/heads"); err == nil {
 		v.BranchCount, v.GoneBranches, v.StaleBranches = parseBranchHealth(out, time.Now(), skip)
 	}
@@ -371,10 +392,10 @@ func countBranchNames(out string, skip map[string]bool) int {
 	return count
 }
 
-// localBranchName strips the origin remote prefix off a default-branch ref, so
+// LocalBranchName strips the origin remote prefix off a default-branch ref, so
 // the "origin/main" that defaultBranch resolves to can be matched against the
 // local branch names for-each-ref reports.
-func localBranchName(ref string) string {
+func LocalBranchName(ref string) string {
 	return strings.TrimPrefix(ref, "origin/")
 }
 
@@ -389,6 +410,7 @@ func (r *shellRepo) Branches() ([]Branch, error) {
 	format := strings.Join([]string{
 		"%(HEAD)", "%(refname:short)", "%(upstream:short)",
 		"%(upstream:track,nobracket)", "%(committerdate:unix)", "%(authorname)",
+		"%(objectname)",
 	}, unitSep)
 	out, err := r.run("for-each-ref", "--sort=-committerdate", "--format="+format, "refs/heads")
 	if err != nil {
@@ -399,6 +421,19 @@ func (r *shellRepo) Branches() ([]Branch, error) {
 	// Fallback: for branches without an upstream, compare against the default
 	// branch so they aren't left with a bare "—".
 	base := r.defaultBranch()
+	if base != "" {
+		if out, err := r.run("for-each-ref", "--merged", base, "--format=%(refname:short)", "refs/heads"); err == nil {
+			merged := map[string]bool{}
+			for _, name := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+				if name = strings.TrimSpace(name); name != "" {
+					merged[name] = true
+				}
+			}
+			for i := range branches {
+				branches[i].Merged = merged[branches[i].Name]
+			}
+		}
+	}
 	if base != "" {
 		for i := range branches {
 			b := &branches[i]
@@ -462,6 +497,9 @@ func parseBranches(out string) []Branch {
 			Upstream:   f[2],
 			LastAuthor: f[5],
 		}
+		if len(f) > 6 {
+			b.Tip = strings.TrimSpace(f[6])
+		}
 		switch track := strings.TrimSpace(f[3]); {
 		case track == "gone":
 			b.Gone = true
@@ -495,6 +533,46 @@ func parseTrack(s string) (ahead, behind int) {
 		}
 	}
 	return ahead, behind
+}
+
+// DefaultBranch returns the ref cleanup and comparison are measured against:
+// the remote's HEAD when known ("origin/main"), otherwise a local main/master.
+// An empty string means neither could be resolved.
+func (r *shellRepo) DefaultBranch() string { return r.defaultBranch() }
+
+// Fetch updates the remote-tracking refs, pruning the ones whose remote branch
+// has been deleted when prune is set. This is what makes Branch.Gone mean
+// anything: without a pruning fetch, a branch deleted on the forge months ago
+// still looks alive locally.
+//
+// It talks to the network and can fail for reasons that have nothing to do with
+// the repository (offline, credentials); callers are expected to treat a
+// failure as degraded rather than fatal.
+func (r *shellRepo) Fetch(prune bool) error {
+	args := []string{"fetch", "--quiet"}
+	if prune {
+		args = append(args, "--prune")
+	}
+	// The only command here that touches the network, so the only one that can
+	// hang on an unreachable remote. Callers treat a failure as degraded.
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	_, err := r.runContext(ctx, args...)
+	return err
+}
+
+// DeleteBranch deletes a local branch. Without force this is `git branch -d`,
+// which refuses to drop a branch whose commits aren't reachable elsewhere —
+// git's own merge check, kept as a safety net under gitling's. force switches
+// to -D, which is needed for squash-merged branches (their commits never became
+// ancestors of the default branch) and can genuinely lose work.
+func (r *shellRepo) DeleteBranch(name string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := r.run("branch", flag, "--", name)
+	return err
 }
 
 // Commits returns non-merge commits in revRange (e.g. "abc123..HEAD"), or the

@@ -12,8 +12,14 @@ type Backend interface {
 	IsAncestor(maybeAncestor, descendant string) bool
 	Vitals() (Vitals, error)
 	Branches() ([]Branch, error)
+	DefaultBranch() string
 	Commits(revRange string) ([]Commit, error)
 	RecentCommits(limit int) ([]RecentCommit, error)
+
+	// Mutating operations, used only by the tidy command. Every other caller is
+	// read-only, which is what makes gitling safe to run anywhere.
+	Fetch(prune bool) error
+	DeleteBranch(name string, force bool) error
 }
 
 // Repo is a handle to a git repository, backed by whichever Backend was
@@ -49,6 +55,18 @@ func (r *Repo) Vitals() (Vitals, error) { return r.backend.Vitals() }
 
 // Branches returns the local branches for the branches drill-down.
 func (r *Repo) Branches() ([]Branch, error) { return r.backend.Branches() }
+
+// DefaultBranch returns the repository's default branch ref, or "" when it
+// cannot be resolved.
+func (r *Repo) DefaultBranch() string { return r.backend.DefaultBranch() }
+
+// Fetch updates remote-tracking refs, pruning deleted ones when prune is set.
+func (r *Repo) Fetch(prune bool) error { return r.backend.Fetch(prune) }
+
+// DeleteBranch deletes a local branch, using git's merge check unless force.
+func (r *Repo) DeleteBranch(name string, force bool) error {
+	return r.backend.DeleteBranch(name, force)
+}
 
 // Commits returns non-merge commits in revRange, or the entire history when
 // revRange is empty.
