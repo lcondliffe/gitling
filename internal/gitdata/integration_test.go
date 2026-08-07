@@ -9,21 +9,9 @@ import (
 	"time"
 )
 
-// Integration tests for the shell-out git layer: everything below here drives a
-// real `git` against a real repository built in t.TempDir(). The parser tests
-// elsewhere in this package prove we read git's output correctly; these prove
-// we asked git the right question in the first place, which is the half that
-// matters for a command that deletes branches.
-//
-// Gating: these skip when git is missing rather than failing (see requireGit).
-// A build tag was the alternative and was rejected — CI runs a bare
-// `go test ./...`, so a tag would mean the write layer's only tests never run
-// on any pull request, which is the situation this suite exists to end.
-//
-// Backend: these call openShell directly rather than Open. Open is
-// build-tag-dependent, and under `-tags gogit` it returns a backend whose
-// Fetch and DeleteBranch are deliberately errReadOnly stubs. Pinning the shell
-// backend explicitly means this file runs identically under both tag builds.
+// Integration tests driving a real git against a real repository in
+// t.TempDir(). They skip when git is missing rather than failing, so a bare
+// `go test ./...` still runs them wherever git exists.
 
 // requireGit skips the calling test when there is no usable git on PATH.
 func requireGit(t *testing.T) {
@@ -33,16 +21,13 @@ func requireGit(t *testing.T) {
 	}
 }
 
-// gitCmd runs git in dir and fails the test if it errors. Setup only — never
-// used to assert behaviour, so a test can't pass by re-implementing the thing
-// it is meant to be checking.
+// gitCmd runs git in dir and fails the test if it errors. Setup only.
 func gitCmd(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return gitCmdAt(t, dir, time.Time{}, args...)
 }
 
-// gitCmdAt is gitCmd with a fixed commit timestamp, so a fixture can contain a
-// branch that has genuinely not been touched for a year.
+// gitCmdAt is gitCmd with a fixed commit timestamp, for backdating.
 func gitCmdAt(t *testing.T, dir string, when time.Time, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -85,16 +70,14 @@ func commitFile(t *testing.T, dir, name, content, msg string, when time.Time) {
 	gitCmdAt(t, dir, when, "commit", "-q", "-m", msg)
 }
 
-// fixture is a local repository with a bare "remote" it can push to, which is
-// what makes upstream tracking — and therefore Branch.Gone — mean anything.
+// fixture is a local repository with a bare remote, so upstream tracking (and
+// therefore Branch.Gone) means something.
 type fixture struct {
 	local  string
 	remote string
 }
 
-// newFixture builds a repo with a real origin and a main branch with one
-// commit. Individual tests add the branch shapes they need, so each test's
-// setup reads as the scenario it is testing.
+// newFixture builds a repo with a real origin and one commit on main.
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	requireGit(t)
@@ -119,27 +102,25 @@ func newFixture(t *testing.T) fixture {
 }
 
 // repo opens the fixture with the shell backend under test.
-func (f fixture) repo(t *testing.T) *shellRepo {
+func (f fixture) repo(t *testing.T) *Repo {
 	t.Helper()
-	r, err := openShell(f.local)
+	r, err := Open(f.local)
 	if err != nil {
-		t.Fatalf("openShell: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	return r
 }
 
-// branchOnRemoteDeleted removes a branch inside the bare remote directly,
-// rather than pushing a delete from the clone. `git push origin --delete`
-// would also drop the local remote-tracking ref as a side effect, leaving
-// nothing for a pruning fetch to find — this reproduces the real shape, where
-// someone else's merge deleted the branch and this clone has not heard yet.
+// branchOnRemoteDeleted deletes a branch inside the bare remote directly.
+// `git push origin --delete` would also drop the local tracking ref, leaving
+// nothing for a pruning fetch to find.
 func (f fixture) branchOnRemoteDeleted(t *testing.T, name string) {
 	t.Helper()
 	gitCmd(t, f.remote, "branch", "-D", name)
 }
 
 // branches indexes Branches() by name for assertions.
-func branchesByName(t *testing.T, r *shellRepo) map[string]Branch {
+func branchesByName(t *testing.T, r *Repo) map[string]Branch {
 	t.Helper()
 	got, err := r.Branches()
 	if err != nil {
@@ -166,9 +147,7 @@ func refExists(t *testing.T, dir, ref string) bool {
 	return cmd.Run() == nil
 }
 
-// TestIntegrationBranchesMergedAndTip covers the two fields the tidy command's
-// safety rests on. Merged decides -d versus -D; Tip is the hash printed as the
-// restore instruction. Both are populated by Branches and neither had a test.
+// Merged decides -d versus -D; Tip is the printed restore hash.
 func TestIntegrationBranchesMergedAndTip(t *testing.T) {
 	f := newFixture(t)
 
@@ -208,10 +187,8 @@ func TestIntegrationBranchesMergedAndTip(t *testing.T) {
 	}
 }
 
-// TestIntegrationSquashMergedIsGoneNotMerged covers the squash-merge shape,
-// which is the whole reason tidy has a --gone category. The work is in main
-// under a new hash, so git does not consider the branch merged; the evidence
-// that it is safe is that the remote branch was deleted.
+// The squash-merge shape: work is in main under a new hash, so git sees the
+// branch as unmerged and only the deleted remote branch vouches for it.
 func TestIntegrationSquashMergedIsGoneNotMerged(t *testing.T) {
 	f := newFixture(t)
 
@@ -242,8 +219,7 @@ func TestIntegrationSquashMergedIsGoneNotMerged(t *testing.T) {
 	}
 }
 
-// TestIntegrationFetchPrune proves Fetch(true) is what makes Gone mean
-// anything, and that Fetch(false) leaves the stale ref alone.
+// Fetch(true) is what makes Gone mean anything; Fetch(false) must not prune.
 func TestIntegrationFetchPrune(t *testing.T) {
 	t.Run("prune removes the stale remote-tracking ref", func(t *testing.T) {
 		f := newFixture(t)
@@ -292,10 +268,8 @@ func TestIntegrationFetchPrune(t *testing.T) {
 	})
 }
 
-// TestIntegrationDeleteBranch is the acceptance criterion in one test: a merged
-// branch goes with -d, a squash-merged one is refused by -d and needs -D. The
-// refusal is git's own merge check, which tidy keeps underneath its own
-// classification as a safety net — so it has to actually be there.
+// A merged branch goes with -d; a squash-merged one is refused and needs -D.
+// The refusal is git's own merge check, kept as a safety net under tidy's.
 func TestIntegrationDeleteBranch(t *testing.T) {
 	f := newFixture(t)
 
@@ -336,9 +310,7 @@ func TestIntegrationDeleteBranch(t *testing.T) {
 	}
 }
 
-// TestIntegrationDeleteBranchRefusesCheckedOut covers the other deletion git
-// refuses outright. tidy protects the current branch itself, but if that ever
-// regressed, git is the backstop — including under -D.
+// tidy protects the current branch, but git is the backstop if that regresses.
 func TestIntegrationDeleteBranchRefusesCheckedOut(t *testing.T) {
 	f := newFixture(t)
 	r := f.repo(t)
@@ -354,10 +326,8 @@ func TestIntegrationDeleteBranchRefusesCheckedOut(t *testing.T) {
 	}
 }
 
-// TestIntegrationDeletedBranchIsRestorable is the safety argument for allowing
-// -D at all: tidy prints "restore any of these with git branch <name> <hash>",
-// and this proves that instruction actually works, using the hash the tool
-// itself reported rather than one the test looked up separately.
+// The restore instruction tidy prints must actually work, using the hash the
+// tool itself reported.
 func TestIntegrationDeletedBranchIsRestorable(t *testing.T) {
 	f := newFixture(t)
 
@@ -395,9 +365,8 @@ func TestIntegrationDeletedBranchIsRestorable(t *testing.T) {
 	}
 }
 
-// TestIntegrationStaleBranchDates proves LastCommit reflects the real committer
-// date, which is what the stale threshold is measured against. A backdated
-// fixture is the only way to test this without waiting 90 days.
+// LastCommit must reflect the real committer date; the stale threshold
+// measures against it.
 func TestIntegrationStaleBranchDates(t *testing.T) {
 	f := newFixture(t)
 
@@ -418,8 +387,7 @@ func TestIntegrationStaleBranchDates(t *testing.T) {
 	}
 }
 
-// TestIntegrationDefaultBranch covers the ref every other answer is measured
-// against. Getting it wrong makes "merged" meaningless.
+// The ref everything else is measured against.
 func TestIntegrationDefaultBranch(t *testing.T) {
 	f := newFixture(t)
 	if got := f.repo(t).DefaultBranch(); got != "main" {
@@ -427,11 +395,10 @@ func TestIntegrationDefaultBranch(t *testing.T) {
 	}
 }
 
-// TestIntegrationOpenRejectsNonRepo keeps the error path honest: a directory
-// that is not a repository must fail rather than silently behaving as one.
+// A non-repository must fail rather than behave as one.
 func TestIntegrationOpenRejectsNonRepo(t *testing.T) {
 	requireGit(t)
-	if _, err := openShell(t.TempDir()); err == nil {
-		t.Error("openShell on a non-repository should fail")
+	if _, err := Open(t.TempDir()); err == nil {
+		t.Error("Open on a non-repository should fail")
 	}
 }

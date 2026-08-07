@@ -121,9 +121,6 @@ into your local `main` but never pushed is treated as unmerged and needs `-D`.
   information.
 - A branch git refuses to delete is reported and the rest still run.
 
-`gitling tidy` needs the shell-out backend; under `-tags gogit` it refuses, as
-that build is read-only.
-
 ## Config file
 
 gitling optionally reads defaults from
@@ -154,34 +151,5 @@ shouldn't be switched off by naming one more pattern.
 go build ./cmd/gitling
 ```
 
-Pure Go standard library — no external dependencies.
-
-### Optional go-git backend
-
-`internal/gitdata` sits behind a small `Backend` interface, implemented by
-default by shelling out to `git`. A pure-Go [go-git](https://github.com/go-git/go-git)
-implementation is available behind a build tag:
-
-```sh
-go build -tags gogit ./cmd/gitling
-```
-
-This trades the dependency-free default for not needing `git` on `PATH`. It
-isn't the default because shell-out is still faster on this project's
-benchmarks for the commit-log walk that dominates runtime. `GITLING_BACKEND=shell`
-forces shell-out in a tagged binary. The build is read-only, and known
-divergences are documented on `gogitRepo` in `internal/gitdata/gogit.go`.
-
-### Optional sqlite cache backend
-
-The default cache is a zero-dependency gob file under `.git/gitling-cache/`.
-For very large repos, a sqlite-backed store is available behind a build tag:
-
-```sh
-go build -tags sqlite ./cmd/gitling
-```
-
-It uses [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go
-and cgo-free, so the tagged build still cross-compiles without a C toolchain.
-It implements the same `cache.Backend` interface as the gob store, so gitling
-behaves identically either way; only the on-disk format changes.
+Pure Go standard library: `go.mod` has no requirements and there is no
+`go.sum`. Needs `git` on `PATH` at runtime.
