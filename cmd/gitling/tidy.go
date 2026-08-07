@@ -93,12 +93,10 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		return 2
 	}
 
-	protectGlobs := append(append([]string{}, cfg.Protect...), protect...)
-	for _, pattern := range protectGlobs {
-		if _, err := path.Match(pattern, ""); err != nil {
-			fmt.Fprintf(os.Stderr, "gitling: invalid --protect pattern %q\n", pattern)
-			return 2
-		}
+	protectGlobs, err := protectPatterns(cfg.Protect, protect)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gitling:", err)
+		return 2
 	}
 
 	sel, err := tidySelection(*merged, *gone, *stale)
@@ -143,6 +141,20 @@ type tidyRepo interface {
 	DefaultBranch() string
 	Fetch(prune bool) error
 	DeleteBranch(name string, force bool) error
+}
+
+// protectPatterns is every glob that must survive the cleanup: the config's
+// first, then the run's own --protect flags. A pattern path.Match can't use is
+// rejected here rather than at match time, where it would read as "this branch
+// is protected by a broken pattern" against every branch in turn.
+func protectPatterns(fromConfig, fromFlags []string) ([]string, error) {
+	globs := append(append([]string{}, fromConfig...), fromFlags...)
+	for _, pattern := range globs {
+		if _, err := path.Match(pattern, ""); err != nil {
+			return nil, fmt.Errorf("invalid --protect pattern %q", pattern)
+		}
+	}
+	return globs, nil
 }
 
 // selection is which categories are in play, and the stale threshold.

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -338,14 +339,69 @@ func TestRunTidyRejectsMalformedConfig(t *testing.T) {
 	}
 }
 
+// TestProtectPatterns pins the merge tidy.Options is given: config globs first,
+// then the run's own, and a pattern that can't be matched is an error rather
+// than something Classify has to deal with per branch.
+func TestProtectPatterns(t *testing.T) {
+	tests := []struct {
+		name             string
+		config, flags    []string
+		want             []string
+		wantErrSubstring string
+	}{{
+		name: "neither",
+	}, {
+		name:   "config only",
+		config: []string{"release/*"},
+		want:   []string{"release/*"},
+	}, {
+		name:  "flags only",
+		flags: []string{"wip/*"},
+		want:  []string{"wip/*"},
+	}, {
+		name:   "config globs come first, both are kept",
+		config: []string{"release/*", "hotfix/*"},
+		flags:  []string{"wip/*"},
+		want:   []string{"release/*", "hotfix/*", "wip/*"},
+	}, {
+		name:             "a malformed config glob is rejected",
+		config:           []string{"[bad"},
+		wantErrSubstring: "[bad",
+	}, {
+		name:             "a malformed flag glob is rejected",
+		flags:            []string{"release/*", "[bad"},
+		wantErrSubstring: "[bad",
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := protectPatterns(tt.config, tt.flags)
+			if tt.wantErrSubstring != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstring) {
+					t.Fatalf("error = %v, want one naming %q", err, tt.wantErrSubstring)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("protectPatterns() error: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("protectPatterns() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A config-supplied protect glob has to reach tidy the same way --protect does.
 func TestRunTidyUsesConfigProtect(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gitling.json")
-	if err := os.WriteFile(path, []byte(`{"protect":["release/*"],"color":"never"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"protect":["[bad"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--config", path}); got != 0 {
-		t.Errorf("runTidy with a config = %d, want 0", got)
+	// The glob is only ever validated on the way to tidy.Options, so rejecting
+	// it proves the config's patterns take that path.
+	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--config", path}); got != 2 {
+		t.Errorf("runTidy with a malformed config glob = %d, want 2", got)
 	}
 }

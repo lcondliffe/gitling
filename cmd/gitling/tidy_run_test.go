@@ -33,6 +33,7 @@ type fakeRepo struct {
 	deleteErrs map[string]error // by branch name; a branch git would refuse
 
 	fetched int
+	pruned  bool // whether the last fetch asked for a prune
 	deleted []deletion
 }
 
@@ -47,6 +48,7 @@ func (f *fakeRepo) DefaultBranch() string { return f.base }
 
 func (f *fakeRepo) Fetch(prune bool) error {
 	f.fetched++
+	f.pruned = prune
 	return f.fetchErr
 }
 
@@ -251,6 +253,22 @@ func TestTidyRunFetchFailureDegrades(t *testing.T) {
 	}
 	if strings.Contains(out, "fetch failed") {
 		t.Errorf("the warning belongs on stderr, not in the plan:\n%s", out)
+	}
+}
+
+// The fetch has to prune: Gone is derived from remote-tracking refs, so without
+// pruning a branch deleted on the forge still looks alive and the most useful
+// category comes back empty.
+func TestTidyRunFetchPrunes(t *testing.T) {
+	repo := newFakeRepo()
+	if _, _, err := runTidyWith(t, repo, "", tidyOptions{fetch: true}); err != nil {
+		t.Fatalf("tidyRun() error: %v", err)
+	}
+	if repo.fetched != 1 {
+		t.Fatalf("fetched %d times, want 1", repo.fetched)
+	}
+	if !repo.pruned {
+		t.Error("fetched without --prune, so gone-ness would be stale")
 	}
 }
 
