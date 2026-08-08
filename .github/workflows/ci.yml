@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Release PRs are opened with GITHUB_TOKEN, which fires no pull_request event,
+  # so their required checks would never report. release-please.yml asks for this
+  # run by hand — workflow_dispatch is the one trigger GITHUB_TOKEN can fire.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # to dispatch CI onto the release PR branch
 
 jobs:
   release-please:
@@ -20,6 +21,20 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The release PR is opened with GITHUB_TOKEN, and GitHub fires no
+      # pull_request event for those — so CI never reported on it and main's
+      # required checks could only ever be bypassed by an admin. Dispatching the
+      # run explicitly puts the same three build contexts on the branch head,
+      # which is what branch protection actually looks at.
+      - name: run CI on the release PR branch
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(printf '%s' "$RELEASE_PR" | jq -r .headBranchName)
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
   # release-please pushes the tag with GITHUB_TOKEN, and GitHub does not fire
   # workflows for those, so release.yml is called directly rather than left to
