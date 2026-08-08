@@ -27,13 +27,21 @@ jobs:
       # required checks could only ever be bypassed by an admin. Dispatching the
       # run explicitly puts the same three build contexts on the branch head,
       # which is what branch protection actually looks at.
+      # Keyed off the open release PR rather than this run's outputs: the action
+      # only reports a pr when it changed one, but the branch head also moves
+      # when the PR is rebased or updated, and every one of those heads needs its
+      # own checks. No open release PR is the no-op case.
       - name: run CI on the release PR branch
-        if: steps.release.outputs.pr != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          branch=$(printf '%s' "$RELEASE_PR" | jq -r .headBranchName)
+          branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release-please--"))][0].headRefName // ""')
+          if [ -z "$branch" ]; then
+            echo "no open release PR; nothing to check"
+            exit 0
+          fi
+          echo "dispatching CI at $branch"
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
   # release-please pushes the tag with GITHUB_TOKEN, and GitHub does not fire
