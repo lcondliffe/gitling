@@ -31,7 +31,14 @@ jobs:
       # only reports a pr when it changed one, but the branch head also moves
       # when the PR is rebased or updated, and every one of those heads needs its
       # own checks. No open release PR is the no-op case.
+      #
+      # Best effort on purpose: the dispatch can only work on a branch whose own
+      # copy of ci.yml already has the workflow_dispatch trigger, since that is
+      # read from the dispatched ref. A release branch cut before that landed
+      # can't be dispatched at all, and that is a merge to unblock by hand, not
+      # a broken release pipeline.
       - name: run CI on the release PR branch
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
