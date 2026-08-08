@@ -5,6 +5,9 @@ import (
 	"flag"
 	"io"
 	"maps"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -266,5 +269,139 @@ func TestRunTidyAcceptsValidProtectGlob(t *testing.T) {
 	var out bytes.Buffer
 	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--protect", "release/*"}); got != 0 {
 		t.Errorf("runTidy with a valid glob = %d, want 0", got)
+	}
+}
+
+// TestRunTidyArgs covers the argument handling that sits above tidyRun. Every
+// case here is a dry run against this repository, so nothing can be deleted.
+func TestRunTidyArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{{
+		// The separated --stale value is a positional the parser stopped at;
+		// runTidy adopts it and resumes on what follows.
+		name: "separated stale value is adopted",
+		args: []string{"--no-fetch", "--stale", "180d", "--protect", "release/*"},
+	}, {
+		name: "attached stale value",
+		args: []string{"--no-fetch", "--stale=180d"},
+	}, {
+		name: "bare stale",
+		args: []string{"--no-fetch", "--stale"},
+	}, {
+		name: "no-color",
+		args: []string{"--no-fetch", "--no-color"},
+	}, {
+		name: "a stray argument is rejected",
+		args: []string{"--no-fetch", "nonsense"},
+		want: 2,
+	}, {
+		// Not a duration, so it stays a stray argument rather than a threshold.
+		name: "an unparseable stale value stays a stray argument",
+		args: []string{"--no-fetch", "--stale", "soon"},
+		want: 2,
+	}, {
+		name: "an invalid stale duration is rejected",
+		args: []string{"--no-fetch", "--stale=0d"},
+		want: 2,
+	}, {
+		name: "an unknown flag is rejected",
+		args: []string{"--no-fetch", "--nope"},
+		want: 2,
+	}, {
+		name: "an invalid color mode is rejected",
+		args: []string{"--no-fetch", "--color=mauve"},
+		want: 2,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if got := runTidy(&out, strings.NewReader(""), tt.args); got != tt.want {
+				t.Errorf("runTidy(%q) = %d, want %d", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// A config that can't be parsed stops the run: tidy is about to act on what it
+// says, so guessing at the defaults instead would be acting on the wrong rules.
+func TestRunTidyRejectsMalformedConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gitling.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--config", path}); got != 2 {
+		t.Errorf("runTidy with a malformed config = %d, want 2", got)
+	}
+}
+
+// TestProtectPatterns pins the merge tidy.Options is given: config globs first,
+// then the run's own, and a pattern that can't be matched is an error rather
+// than something Classify has to deal with per branch.
+func TestProtectPatterns(t *testing.T) {
+	tests := []struct {
+		name             string
+		config, flags    []string
+		want             []string
+		wantErrSubstring string
+	}{{
+		name: "neither",
+	}, {
+		name:   "config only",
+		config: []string{"release/*"},
+		want:   []string{"release/*"},
+	}, {
+		name:  "flags only",
+		flags: []string{"wip/*"},
+		want:  []string{"wip/*"},
+	}, {
+		name:   "config globs come first, both are kept",
+		config: []string{"release/*", "hotfix/*"},
+		flags:  []string{"wip/*"},
+		want:   []string{"release/*", "hotfix/*", "wip/*"},
+	}, {
+		name:             "a malformed config glob is rejected",
+		config:           []string{"[bad"},
+		wantErrSubstring: "[bad",
+	}, {
+		name:             "a malformed flag glob is rejected",
+		flags:            []string{"release/*", "[bad"},
+		wantErrSubstring: "[bad",
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := protectPatterns(tt.config, tt.flags)
+			if tt.wantErrSubstring != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstring) {
+					t.Fatalf("error = %v, want one naming %q", err, tt.wantErrSubstring)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("protectPatterns() error: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("protectPatterns() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A config-supplied protect glob has to reach tidy the same way --protect does.
+func TestRunTidyUsesConfigProtect(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gitling.json")
+	if err := os.WriteFile(path, []byte(`{"protect":["[bad"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	// The glob is only ever validated on the way to tidy.Options, so rejecting
+	// it proves the config's patterns take that path.
+	if got := runTidy(&out, strings.NewReader(""), []string{"--no-fetch", "--config", path}); got != 2 {
+		t.Errorf("runTidy with a malformed config glob = %d, want 2", got)
 	}
 }
