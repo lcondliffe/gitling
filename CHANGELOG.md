@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/lcondliffe/gitling/compare/v0.5.3...v0.5.4) (2026-08-09)
+
+
+### Bug Fixes
+
+* **tidy:** print the apply plan once ([#36](https://github.com/lcondliffe/gitling/issues/36)) ([307ab4e](https://github.com/lcondliffe/gitling/commit/307ab4eb16df571513a549b20d60a586cb91ad43))
+
 ## [0.5.3](https://github.com/lcondliffe/gitling/compare/v0.5.2...v0.5.3) (2026-08-08)
 
 
