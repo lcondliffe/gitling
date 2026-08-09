@@ -49,6 +49,68 @@ func TestGoldenTidyApplied(t *testing.T) {
 	checkGolden(t, "tidy-applied.golden.txt", buf.Bytes())
 }
 
+// The result report replaces a second copy of the table, so it must carry the
+// outcome on its own: the count, every refusal by name, and the undo hint.
+func TestTidyResultReportsOutcomeWithoutThePlan(t *testing.T) {
+	var buf bytes.Buffer
+	TidyResult(&buf, TidyModel{
+		Plan: goldenTidyPlan(), Now: goldenNow, Width: 90, Applied: true,
+		Failed: map[string]error{"feat/heatmap": errors.New("not fully merged\nsecond line")},
+	}, false)
+
+	got := buf.String()
+	for _, want := range []string{"3 branches deleted", "kept feat/heatmap: not fully merged", "git branch <name> <hash>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("result missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"TIDY", "merged into origin/main", "chore/tidy-readme", "second line"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("result repeats %q from the plan:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestTidyResultWithAllFailuresOmitsRestoreHint(t *testing.T) {
+	plan := tidy.Plan{
+		Base:  "main",
+		Total: 1,
+		Candidates: []tidy.Candidate{
+			{Branch: gitdata.Branch{Name: "feat/x", Tip: "abc1234", LastCommit: goldenNow}, Reason: tidy.ReasonGone, Force: true},
+		},
+	}
+	var buf bytes.Buffer
+	TidyResult(&buf, TidyModel{
+		Plan: plan, Now: goldenNow, Applied: true,
+		Failed: map[string]error{"feat/x": errors.New("nope")},
+	}, false)
+
+	got := buf.String()
+	if strings.Contains(got, "git branch <name> <hash>") {
+		t.Errorf("restore hint shown with nothing deleted:\n%s", got)
+	}
+	if !strings.Contains(got, "0 branches deleted") || !strings.Contains(got, "kept feat/x: nope") {
+		t.Errorf("failure summary:\n%s", got)
+	}
+}
+
+func TestTidyResultNeverExceedsTerminalWidth(t *testing.T) {
+	plan := goldenTidyPlan()
+	plan.Candidates[0].Branch.Name = strings.Repeat("very-long-branch-name/", 6)
+	for _, width := range []int{40, 60, 80, 120} {
+		var buf bytes.Buffer
+		TidyResult(&buf, TidyModel{
+			Plan: plan, Now: goldenNow, Width: width, Applied: true,
+			Failed: map[string]error{plan.Candidates[0].Branch.Name: errors.New("not fully merged")},
+		}, false)
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if runeLen(line) > width {
+				t.Errorf("width %d: line of %d columns: %q", width, runeLen(line), line)
+			}
+		}
+	}
+}
+
 func TestTidyEmptyPlan(t *testing.T) {
 	var buf bytes.Buffer
 	Tidy(&buf, TidyModel{Plan: tidy.Plan{Total: 3, Base: "main"}, Now: goldenNow}, false)

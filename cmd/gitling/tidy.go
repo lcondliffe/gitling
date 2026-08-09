@@ -223,12 +223,14 @@ func tidyRun(stdout, stderr io.Writer, stdin io.Reader, repo tidyRepo, o tidyOpt
 		return nil
 	}
 
+	shown := false
 	if !o.assumeYes {
 		// Show the plan before asking, so the prompt is answered with the list
 		// in view rather than from memory.
 		model.Confirming = true
 		render.Tidy(stdout, model, o.color)
 		model.Confirming = false
+		shown = true
 
 		ok := confirm(stdout, stdin, fmt.Sprintf("Delete %d %s?",
 			len(plan.Candidates), pluralBranches(len(plan.Candidates))))
@@ -241,7 +243,11 @@ func tidyRun(stdout, stderr io.Writer, stdin io.Reader, repo tidyRepo, o tidyOpt
 
 	model.Applied = true
 	model.Failed = deleteBranches(repo, plan)
-	render.Tidy(stdout, model, o.color)
+	if shown {
+		render.TidyResult(stdout, model, o.color)
+	} else {
+		render.Tidy(stdout, model, o.color)
+	}
 	if n := len(model.Failed); n > 0 {
 		return fmt.Errorf("%d %s could not be deleted", n, pluralBranches(n))
 	}

@@ -93,6 +93,28 @@ func Tidy(w io.Writer, m TidyModel, color bool) {
 	fmt.Fprintln(w)
 }
 
+// TidyResult reports what applying the plan did, without repeating the plan. It
+// is for the confirmation path, where the list is already on screen directly
+// above the prompt and printing it a second time says nothing new.
+func TidyResult(w io.Writer, m TidyModel, color bool) {
+	p := palette{on: color}
+	deleted := len(m.Plan.Candidates) - len(m.Failed)
+
+	fmt.Fprintln(w)
+	p.tidyLine(w, m.Width, cAccent, fmt.Sprintf("%d %s deleted", deleted, plural(deleted, "branch", "branches")))
+	// Name the branches git refused: with no table reprinted, this is the only
+	// place the failure is reported.
+	for _, c := range m.Plan.Candidates {
+		if err, failed := m.Failed[c.Branch.Name]; failed {
+			p.tidyLine(w, m.Width, cRed, fmt.Sprintf("kept %s: %s", c.Branch.Name, firstLine(err.Error())))
+		}
+	}
+	if deleted > 0 {
+		p.tidyLine(w, m.Width, cLabel, "restore any of these with: git branch <name> <hash>")
+	}
+	fmt.Fprintln(w)
+}
+
 func tidyHeaderSuffix(m TidyModel) string {
 	n := len(m.Plan.Candidates)
 	if m.Applied {

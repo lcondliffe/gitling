@@ -186,6 +186,29 @@ func TestTidyRunAppliesForcePerCandidate(t *testing.T) {
 	}
 }
 
+// The plan is printed once, before the prompt; what follows the answer is the
+// outcome, not the same table again.
+func TestTidyRunConfirmedApplyPrintsThePlanOnce(t *testing.T) {
+	repo := newFakeRepo()
+	repo.deleteErrs = map[string]error{"feat/gone": errors.New("not fully merged")}
+
+	out, _, err := runTidyWith(t, repo, "y\n", applyOpts())
+	if err == nil {
+		t.Fatal("tidyRun() = nil error, want the refusal reported")
+	}
+	if n := strings.Count(out, "feat/merged"); n != 1 {
+		t.Errorf("branch listed %d times, want 1:\n%s", n, out)
+	}
+	if n := strings.Count(out, "TIDY"); n != 1 {
+		t.Errorf("header printed %d times, want 1:\n%s", n, out)
+	}
+	for _, want := range []string{"1 branch deleted", "kept feat/gone: not fully merged"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestTidyRunYesSkipsThePrompt(t *testing.T) {
 	repo := newFakeRepo()
 	o := applyOpts()
