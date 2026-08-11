@@ -2,10 +2,22 @@ package main
 
 import (
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// The guard rejects the combination before any git call, so this needs no repo.
+func TestRunRejectsJSONWithDrillDown(t *testing.T) {
+	for _, view := range []string{"graph", "churn", "contributors", "branches"} {
+		err := run(io.Discard, options{json: true, view: view})
+		if err == nil || !strings.Contains(err.Error(), "--json") {
+			t.Errorf("run(--json %s) = %v, want a --json error", view, err)
+		}
+	}
+}
 
 func TestParseSinceDays(t *testing.T) {
 	ok := map[string]int{

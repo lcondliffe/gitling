@@ -66,16 +66,19 @@ func (s *Store) Load() (agg *aggregate.Aggregates, lastHash string, ok bool) {
 }
 
 // Save writes aggregates and the HEAD hash atomically (temp file + rename) so a
-// crash mid-write cannot corrupt an existing cache.
+// crash mid-write cannot corrupt an existing cache. The temp file gets a unique
+// name so two gitling runs on the same repo can't truncate each other's
+// half-written cache and rename the wreckage into place.
 func (s *Store) Save(agg *aggregate.Aggregates, lastHash string) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.CreateTemp(dir, filepath.Base(s.path)+".*.tmp")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	if err := gob.NewEncoder(f).Encode(payload{Version: version, LastHash: lastHash, Basis: s.basis, Agg: *agg}); err != nil {
 		f.Close()
 		os.Remove(tmp)

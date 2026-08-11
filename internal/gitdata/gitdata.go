@@ -211,8 +211,10 @@ func (r *Repo) IsAncestor(maybeAncestor, descendant string) bool {
 	return err == nil
 }
 
-// Vitals gathers the current branch / tracking / working-tree state.
-func (r *Repo) Vitals() (Vitals, error) {
+// Vitals gathers the current branch / tracking / working-tree state. Every
+// query degrades on its own — a repo with no upstream, no stashes, or no
+// remote simply leaves those fields zero — so there is nothing to report.
+func (r *Repo) Vitals() Vitals {
 	var v Vitals
 
 	if out, err := r.run("symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
@@ -271,7 +273,7 @@ func (r *Repo) Vitals() (Vitals, error) {
 		}
 	}
 
-	return v, nil
+	return v
 }
 
 // commonDir returns the absolute path to the repository's common git dir. In a
