@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/lcondliffe/gitling/compare/v0.5.4...v0.5.5) (2026-08-12)
+
+
+### Bug Fixes
+
+* reject --json on drill-down views, and unique the cache temp file ([#38](https://github.com/lcondliffe/gitling/issues/38)) ([15e2555](https://github.com/lcondliffe/gitling/commit/15e2555d1c6629d202d82ca9de760c1f41b27de6))
+
 ## [0.5.4](https://github.com/lcondliffe/gitling/compare/v0.5.3...v0.5.4) (2026-08-09)
 
 
