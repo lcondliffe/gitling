@@ -248,6 +248,12 @@ type options struct {
 }
 
 func run(stdout io.Writer, o options) error {
+	// JSON only covers the dashboard model. Say so rather than silently
+	// serving dashboard data to someone who asked for a drill-down.
+	if o.json && o.view != "dashboard" {
+		return fmt.Errorf("--json is only available for the dashboard view, not %s", o.view)
+	}
+
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		return err
@@ -257,7 +263,7 @@ func run(stdout io.Writer, o options) error {
 		return err
 	}
 
-	vitals, _ := repo.Vitals()
+	vitals := repo.Vitals()
 
 	days, err := parseSinceDays(o.since)
 	if err != nil {
@@ -268,7 +274,7 @@ func run(stdout io.Writer, o options) error {
 
 	// The branches view is live git state, independent of the commit-history
 	// aggregate, so serve it before the (potentially expensive) history walk.
-	if !o.json && o.view == "branches" {
+	if o.view == "branches" {
 		branches, err := repo.Branches()
 		if err != nil {
 			return err
@@ -322,7 +328,7 @@ func run(stdout io.Writer, o options) error {
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
 	m.Streak = aggregate.Streak(m.Days)
 	buckets := aggregate.BucketCounts(m.Days, o.bucket)
-	if !o.json && o.view == "graph" {
+	if o.view == "graph" {
 		render.Graph(stdout, render.GraphModel{
 			RangeLabel:   m.RangeLabel,
 			Bucket:       o.bucket,
@@ -335,7 +341,7 @@ func run(stdout io.Writer, o options) error {
 		}, o.color)
 		return nil
 	}
-	if !o.json && o.view == "churn" {
+	if o.view == "churn" {
 		render.Churn(stdout, render.ChurnModel{
 			RangeLabel: m.RangeLabel,
 			Files:      agg.HotFiles(sinceTime, now, 0), // 0 == all files
@@ -344,7 +350,7 @@ func run(stdout io.Writer, o options) error {
 		}, o.color)
 		return nil
 	}
-	if !o.json && o.view == "contributors" {
+	if o.view == "contributors" {
 		render.Contributors(stdout, render.ContributorsModel{
 			RangeLabel:   m.RangeLabel,
 			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors

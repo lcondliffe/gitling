@@ -1,4 +1,7 @@
 # Compiled binary
 /gitling
 
+# Agent scratch worktrees
+/.claude/
+
 # gitling's own cache lives under .git/, so it is already ignored.

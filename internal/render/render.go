@@ -403,20 +403,8 @@ func Churn(w io.Writer, m ChurnModel, color bool) {
 	// Files arrive sorted by descending commit count, so the first is the peak.
 	maxC := m.Files[0].Commits
 	for _, f := range m.Files {
-		filled := 0
-		if maxC > 0 {
-			filled = int(float64(f.Commits)/float64(maxC)*float64(barW) + 0.5)
-		}
-		if filled < 1 {
-			filled = 1 // always show a sliver so every file reads as present
-		}
-		if filled > barW {
-			filled = barW
-		}
-		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
-			strings.Repeat(" ", barW-filled)
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, f.Commits))
-		fmt.Fprintf(w, "  %s   %s   %s\n", bar, count, elidePath(f.Path, pathW))
+		fmt.Fprintf(w, "  %s   %s   %s\n", p.bar(f.Commits, maxC, barW), count, elidePath(f.Path, pathW))
 	}
 
 	fmt.Fprintln(w)
@@ -835,25 +823,28 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int
 	maxC := cs[0].Commits
 	for _, c := range cs {
 		name := truncate(c.Name, nameW)
-		filled := 0
-		if maxC > 0 {
-			filled = int(float64(c.Commits)/float64(maxC)*float64(barW) + 0.5)
-		}
-		if filled < 1 {
-			filled = 1 // always show a sliver so every contributor reads as present
-		}
-		if filled > barW {
-			filled = barW
-		}
-		// Fill-only bar: a green run padded with spaces (no track). Compact
-		// enough to keep rows tight, but with no dim block to stack up; the
-		// space padding still lines the counts up.
-		bar := p.c(cAccent, strings.Repeat(barFill, filled)) +
-			strings.Repeat(" ", barW-filled)
 		pad := strings.Repeat(" ", nameW-runeLen(name))
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
-		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, bar, count)
+		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, p.bar(c.Commits, maxC, barW), count)
 	}
+}
+
+// bar draws one fill-only bar w columns wide: a green run scaled against max,
+// padded with spaces (no track). Compact enough to keep rows tight, but with no
+// dim block to stack up; the space padding still lines the counts up. A nonzero
+// count always gets at least a sliver, so every row reads as present.
+func (p palette) bar(count, max, w int) string {
+	filled := 0
+	if max > 0 {
+		filled = int(float64(count)/float64(max)*float64(w) + 0.5)
+	}
+	if filled < 1 {
+		filled = 1
+	}
+	if filled > w {
+		filled = w
+	}
+	return p.c(cAccent, strings.Repeat(barFill, filled)) + strings.Repeat(" ", w-filled)
 }
 
 // recent draws the newest commits at the tip of HEAD, one per line:
@@ -1027,6 +1018,13 @@ func (p palette) growthChart(vals []int, height int) []string {
 			eighths[i] = 4 // flat history: a thin baseline rather than a full block
 		}
 	}
+	return p.renderColumns(eighths, height)
+}
+
+// renderColumns draws a column chart from per-column heights measured in
+// eighths of a cell (0..height*8), one string per row, top row first. The
+// callers differ only in how they scale their values into those eighths.
+func (p palette) renderColumns(eighths []int, height int) []string {
 	lines := make([]string, height)
 	for r := 0; r < height; r++ { // r == 0 is the top row
 		cellBottom := (height - 1 - r) * 8
@@ -1066,23 +1064,11 @@ func (p palette) barChart(vals []int, height int) []string {
 	if max <= 0 {
 		return nil
 	}
-	lines := make([]string, height)
-	for r := 0; r < height; r++ {
-		cellBottom := (height - 1 - r) * 8
-		var b strings.Builder
-		for _, v := range vals {
-			eighths := int(float64(v)/float64(max)*float64(height*8) + 0.5)
-			fill := eighths - cellBottom
-			if fill < 0 {
-				fill = 0
-			} else if fill > 8 {
-				fill = 8
-			}
-			b.WriteRune(chartBlocks[fill])
-		}
-		lines[r] = p.c(cAccent, strings.TrimRight(b.String(), " "))
+	eighths := make([]int, len(vals))
+	for i, v := range vals {
+		eighths[i] = int(float64(v)/float64(max)*float64(height*8) + 0.5)
 	}
-	return lines
+	return p.renderColumns(eighths, height)
 }
 
 func periodLabel(b aggregate.PeriodCount, bucket string) string {
