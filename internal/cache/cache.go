@@ -88,5 +88,9 @@ func (s *Store) Save(agg *aggregate.Aggregates, lastHash string) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
