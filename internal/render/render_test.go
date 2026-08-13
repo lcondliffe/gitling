@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
@@ -635,6 +636,7 @@ func TestDashboardHidesEmptyOptionalPanels(t *testing.T) {
 		m.Width = width
 		m.Recent = nil
 		m.HotFiles = nil
+		m.PRs = nil
 
 		var buf bytes.Buffer
 		Dashboard(&buf, m, false)
@@ -645,12 +647,38 @@ func TestDashboardHidesEmptyOptionalPanels(t *testing.T) {
 		if strings.Contains(out, "HOT FILES") {
 			t.Errorf("width %d: hot files box should be omitted when empty:\n%s", width, out)
 		}
+		if strings.Contains(out, "OPEN PRS") {
+			t.Errorf("width %d: open PRs box should be omitted when empty:\n%s", width, out)
+		}
 		// The mandatory panels are still there.
 		for _, want := range []string{"REPO", "ACTIVITY", "TOP CONTRIBUTORS", "CODEBASE GROWTH"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("width %d: missing %s box:\n%s", width, want, out)
 			}
 		}
+	}
+}
+
+func TestOpenPRsPanel(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{
+		Now: now,
+		PRs: []forge.PR{
+			{Number: 42, Title: "feat: add the widget", Author: "ada", Updated: now.Add(-2 * time.Hour)},
+			{Number: 7, Title: "wip", Author: "alan", Draft: true, Updated: now.Add(-3 * 24 * time.Hour)},
+		},
+	}, false)
+	out := buf.String()
+
+	if !strings.Contains(out, "OPEN PRS · 2") {
+		t.Errorf("missing open PRs box title:\n%s", out)
+	}
+	if !strings.Contains(out, "#42  feat: add the widget  ada   2h ago") {
+		t.Errorf("missing PR row:\n%s", out)
+	}
+	if !strings.Contains(out, "#7   draft: wip") {
+		t.Errorf("draft should be marked in the title:\n%s", out)
 	}
 }
 

@@ -542,6 +542,16 @@ func parseTrack(s string) (ahead, behind int) {
 // An empty string means neither could be resolved.
 func (r *Repo) DefaultBranch() string { return r.defaultBranch() }
 
+// RemoteURL returns the origin remote's URL, or "" when there is no origin.
+// It is only used to tell which forge (if any) hosts the repo.
+func (r *Repo) RemoteURL() string {
+	out, err := r.run("remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // Fetch updates the remote-tracking refs, pruning the ones whose remote branch
 // has been deleted when prune is set. This is what makes Branch.Gone mean
 // anything: without a pruning fetch, a branch deleted on the forge months ago
