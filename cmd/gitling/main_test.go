@@ -160,13 +160,13 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("loadConfig(missing) error: %v", err)
 	}
 	if cfg.Since != "" || cfg.Color != "" || cfg.Bucket != "" || cfg.Layout != "" ||
-		cfg.Recent != nil || len(cfg.Protect) != 0 {
+		cfg.Recent != nil || cfg.PRs != nil || len(cfg.Protect) != 0 {
 		t.Errorf("loadConfig(missing) = %+v, want zero value", cfg)
 	}
 
 	// Valid config parses.
 	valid := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(valid, []byte(`{"since":"30d","color":"always","bucket":"week","layout":"wide"}`), 0o644); err != nil {
+	if err := os.WriteFile(valid, []byte(`{"since":"30d","color":"always","bucket":"week","layout":"wide","prs":false}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = loadConfig(valid)
@@ -175,6 +175,10 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if cfg.Since != "30d" || cfg.Color != "always" || cfg.Bucket != "week" || cfg.Layout != "wide" {
 		t.Errorf("loadConfig(valid) = %+v", cfg)
+	}
+	// An explicit false has to survive as a set value, not read as absent.
+	if cfg.PRs == nil || *cfg.PRs {
+		t.Errorf(`loadConfig(valid).PRs = %v, want a pointer to false`, cfg.PRs)
 	}
 
 	// The tidy protect list parses as a string slice.
@@ -278,7 +282,7 @@ func TestConfigPath(t *testing.T) {
 func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month","recent":10,"layout":"stack"}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"since":"1y","color":"never","bucket":"month","recent":10,"layout":"stack","prs":false}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := loadConfig(cfgPath)
@@ -292,6 +296,7 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	bucket := fs.String("bucket", "day", "")
 	recent := fs.Int("recent", defaultRecent, "")
 	layout := fs.String("layout", "auto", "")
+	prs := fs.Bool("prs", true, "")
 	if err := fs.Parse([]string{"--since", "7d"}); err != nil {
 		t.Fatal(err)
 	}
@@ -314,6 +319,9 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	if !explicit["layout"] && cfg.Layout != "" {
 		*layout = cfg.Layout
 	}
+	if !explicit["prs"] && cfg.PRs != nil {
+		*prs = *cfg.PRs
+	}
 
 	// --since was explicit: flag value wins over config.
 	if *since != "7d" {
@@ -331,5 +339,23 @@ func TestFlagOverridesConfigPrecedence(t *testing.T) {
 	}
 	if *layout != "stack" {
 		t.Errorf("layout = %q, want %q (config should fill unset flag)", *layout, "stack")
+	}
+	if *prs {
+		t.Error("prs = true, want false (config should fill unset flag)")
+	}
+
+	// The other direction: an explicit --prs=true beats "prs": false in config.
+	fs2 := flag.NewFlagSet("test", flag.ContinueOnError)
+	prs2 := fs2.Bool("prs", true, "")
+	if err := fs2.Parse([]string{"--prs=true"}); err != nil {
+		t.Fatal(err)
+	}
+	explicit2 := map[string]bool{}
+	fs2.Visit(func(f *flag.Flag) { explicit2[f.Name] = true })
+	if !explicit2["prs"] && cfg.PRs != nil {
+		*prs2 = *cfg.PRs
+	}
+	if !*prs2 {
+		t.Error("prs = false, want true (flag should override config)")
 	}
 }

@@ -36,10 +36,34 @@ func TestParseGH(t *testing.T) {
 	}
 }
 
-// A remote no configured forge recognises never runs a command.
+func TestRemoteHost(t *testing.T) {
+	for remote, want := range map[string]string{
+		"https://github.com/acme/thing.git":      "github.com",
+		"https://user:tok@github.com/acme/thing": "github.com",
+		"git@github.com:acme/thing.git":          "github.com",
+		"ssh://git@github.com:22/acme/thing.git": "github.com",
+		"git://GitHub.com/acme/thing.git":        "github.com",
+		"https://notgithub.com/acme/thing.git":   "notgithub.com",
+		"git@gitlab.example.com:acme/thing.git":  "gitlab.example.com",
+		"/srv/git/thing.git":                     "",
+	} {
+		if got := remoteHost(remote); got != want {
+			t.Errorf("remoteHost(%q) = %q, want %q", remote, got, want)
+		}
+	}
+}
+
+// A remote no configured forge recognises never runs a command — including
+// hosts that merely contain a known one.
 func TestListSkipsUnknownHost(t *testing.T) {
-	if prs := List(".", "git@bitbucket.org:acme/thing.git", 5); prs != nil {
-		t.Errorf("got %+v, want nil", prs)
+	for _, remote := range []string{
+		"git@bitbucket.org:acme/thing.git",
+		"https://notgithub.com/acme/thing.git",
+		"https://github.com.evil.example/acme/thing.git",
+	} {
+		if prs := List(".", remote, 5); prs != nil {
+			t.Errorf("%s: got %+v, want nil", remote, prs)
+		}
 	}
 }
 

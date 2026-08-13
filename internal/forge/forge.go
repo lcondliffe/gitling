@@ -8,6 +8,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -47,8 +48,9 @@ var forges = []struct {
 // panel is a bonus; a dashboard that failed because `gh` wasn't installed
 // would be a worse tool.
 func List(dir, remoteURL string, limit int) []PR {
+	host := remoteHost(remoteURL)
 	for _, f := range forges {
-		if !strings.Contains(remoteURL, f.host) {
+		if host != f.host {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
@@ -67,6 +69,30 @@ func List(dir, remoteURL string, limit int) []PR {
 		return prs
 	}
 	return nil
+}
+
+// remoteHost pulls the hostname out of a git remote, which comes in two
+// shapes: a URL (https://host/p, ssh://git@host:22/p) and SCP shorthand
+// (git@host:p). Matching has to be on the host itself — a substring test
+// would take notgithub.com for github.com.
+func remoteHost(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if !strings.Contains(remote, "://") {
+		// SCP shorthand: everything before the first colon, minus any user@.
+		host, _, ok := strings.Cut(remote, ":")
+		if !ok {
+			return ""
+		}
+		if _, after, ok := strings.Cut(host, "@"); ok {
+			host = after
+		}
+		return strings.ToLower(host)
+	}
+	u, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 func ghArgv(limit int) []string {
