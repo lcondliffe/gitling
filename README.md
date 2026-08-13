@@ -41,6 +41,7 @@ gitling tidy             # dry run: local branches that are safe to delete
 gitling tidy --apply     # actually delete them (prompts once)
 gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --layout stack   # force one column; --layout wide forces two
+gitling --prs=false      # skip the open pull requests panel
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --date commit    # bucket by commit date instead of author date
 gitling --color=always   # always, never, or auto (default; honors NO_COLOR)
@@ -49,6 +50,17 @@ gitling --config ~/gitling.json  # use an explicit config file
 
 Each drill-down is available as a subcommand or the matching `--flag`; naming
 two different views is an error.
+
+## Open PRs
+
+The dashboard shows a panel of open pull requests when it can get them, and
+hides it entirely when it can't or when there are none. It never talks to a
+forge API itself: it shells out to the platform's own CLI, so authentication is
+whatever that CLI already has. Today that means GitHub via
+[`gh`](https://cli.github.com); other platforms (GitLab's `glab`, Azure DevOps'
+`az repos`) are one entry in `internal/forge`. With no CLI installed, no
+network, or a remote gitling doesn't recognise, the panel just doesn't appear —
+`--prs=false` skips the lookup altogether.
 
 ## Tidy
 
@@ -136,6 +148,7 @@ stderr.
   "bucket": "week",
   "recent": 5,
   "layout": "auto",
+  "prs": true,
   "protect": ["release/*", "wip/keep-me"]
 }
 ```
