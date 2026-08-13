@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
@@ -33,8 +34,11 @@ type Model struct {
 	Growth       aggregate.Growth
 	HotFiles     []aggregate.FileChurn
 	Recent       []gitdata.RecentCommit
-	Now          time.Time
-	Width        int
+	// PRs are the open pull requests on the forge hosting this repo; empty when
+	// there is no forge, no forge CLI, or nothing open — the panel is dropped.
+	PRs   []forge.PR
+	Now   time.Time
+	Width int
 	// Layout selects the dashboard shape: LayoutAuto (default), LayoutWide, or
 	// LayoutStack. The empty string means auto.
 	Layout string
@@ -185,6 +189,7 @@ func (p palette) dashboardGrid(m Model) []string {
 	// under the heatmap rather than under growth, which balances the heights
 	// and keeps paths in the narrower column where they elide gracefully.
 	vitals := p.vitalsLines(m, panelFullW)
+	prs := p.prLines(m, panelFullW)
 	recent := p.recentLines(m, panelFullW)
 	heatmap := p.heatmapLines(m, panelLeftW)
 	hot := p.hotFileLines(m, panelLeftW)
@@ -196,7 +201,7 @@ func (p palette) dashboardGrid(m Model) []string {
 		// +1 keeps content off the border, +2 covers the border itself.
 		leftW = contentWidth(heatmap, hot) + 3
 		rightW = contentWidth(contributors, growth) + 3
-		fullW = max(contentWidth(vitals, recent)+1, leftW+gridGutter+rightW-2)
+		fullW = max(contentWidth(vitals, prs, recent)+1, leftW+gridGutter+rightW-2)
 	}
 
 	leftBoxes := [][]string{
@@ -213,6 +218,9 @@ func (p palette) dashboardGrid(m Model) []string {
 
 	out := p.box(titleWith("Repo", ""), vitals, fullW)
 	out = append(out, sideBySide(stackBoxes(leftBoxes...), right, leftW, gridGutter)...)
+	if len(prs) > 0 {
+		out = append(out, p.box(prTitle(m), prs, fullW)...)
+	}
 	if len(recent) > 0 {
 		out = append(out, p.box(recentTitle(m), recent, fullW)...)
 	}
@@ -231,6 +239,7 @@ func (p palette) dashboardStack(m Model) []string {
 
 	vitals := p.vitalsLines(m, panelW)
 	heatmap := p.heatmapLines(m, panelW)
+	prs := p.prLines(m, panelW)
 	recent := p.recentLines(m, panelW)
 	contributors := p.contributorLines(m, panelW)
 	growth := p.growthLines(m, panelW)
@@ -238,12 +247,15 @@ func (p palette) dashboardStack(m Model) []string {
 
 	if m.Width <= 0 {
 		// One trailing column keeps content off the right border.
-		innerW = contentWidth(vitals, heatmap, recent, contributors, growth, hot) + 1
+		innerW = contentWidth(vitals, heatmap, prs, recent, contributors, growth, hot) + 1
 	}
 
 	boxes := [][]string{
 		p.box(titleWith("Repo", ""), vitals, innerW),
 		p.box(titleWith("Activity", m.RangeLabel), heatmap, innerW),
+	}
+	if len(prs) > 0 {
+		boxes = append(boxes, p.box(prTitle(m), prs, innerW))
 	}
 	if len(recent) > 0 {
 		boxes = append(boxes, p.box(recentTitle(m), recent, innerW))
@@ -266,6 +278,10 @@ func titleWith(label, suffix string) string {
 		return label
 	}
 	return label + " · " + suffix
+}
+
+func prTitle(m Model) string {
+	return titleWith("Open PRs", strconv.Itoa(len(m.PRs)))
 }
 
 func recentTitle(m Model) string {
@@ -293,6 +309,13 @@ func (p palette) growthLines(m Model, width int) []string {
 
 func (p palette) hotFileLines(m Model, width int) []string {
 	return capture(func(w io.Writer) { p.hotFiles(w, m.HotFiles, width) })
+}
+
+func (p palette) prLines(m Model, width int) []string {
+	if len(m.PRs) == 0 {
+		return nil
+	}
+	return capture(func(w io.Writer) { p.prs(w, m.PRs, m.Now, width) })
 }
 
 func (p palette) recentLines(m Model, width int) []string {
@@ -915,6 +938,68 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 		b.WriteString(p.c(cLabel, humanAgo(c.Time, now)))
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
+}
+
+// prs draws the open pull requests, one per line:
+//
+//	#123  fix: the thing                    alice  2h ago
+//
+// Same shape as recent, and the same trade-off: the title is the flexible
+// column and is truncated rather than wrapped so a PR stays on one line.
+//
+// prs must be non-empty; the caller drops the whole panel when there is
+// nothing open.
+func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
+	numW, authorW, agoW, titleW := 0, 0, 0, 0
+	for _, pr := range prs {
+		if n := runeLen(prNumber(pr)); n > numW {
+			numW = n
+		}
+		if n := runeLen(prTitleText(pr)); n > titleW {
+			titleW = n
+		}
+		if n := runeLen(pr.Author); n > authorW {
+			authorW = n
+		}
+		if n := runeLen(humanAgo(pr.Updated, now)); n > agoW {
+			agoW = n
+		}
+	}
+	if authorW > 16 {
+		authorW = 16
+	}
+
+	// "  " + number + "  " + title + "  " + author + "  " + ago.
+	overhead := 2 + numW + 2 + 2 + authorW + 2 + agoW
+	if width > 0 {
+		const minTitleW = 12
+		if avail := max(width-overhead, minTitleW); avail < titleW {
+			titleW = avail
+		}
+	}
+
+	for _, pr := range prs {
+		var b strings.Builder
+		num := prNumber(pr)
+		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-runeLen(num)) + "  ")
+		title := truncate(prTitleText(pr), titleW)
+		b.WriteString(title + strings.Repeat(" ", titleW-runeLen(title)) + "  ")
+		author := truncate(pr.Author, authorW)
+		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-runeLen(author)) + "  ")
+		b.WriteString(p.c(cLabel, humanAgo(pr.Updated, now)))
+		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
+	}
+}
+
+func prNumber(pr forge.PR) string { return "#" + strconv.Itoa(pr.Number) }
+
+// prTitleText marks drafts inline rather than in a column of their own: most
+// lists have none, and an empty column costs every row.
+func prTitleText(pr forge.PR) string {
+	if pr.Draft {
+		return "draft: " + pr.Title
+	}
+	return pr.Title
 }
 
 // prLabel is the plain (uncolored) pull-request cell, empty when the commit

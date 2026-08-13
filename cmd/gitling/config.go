@@ -18,6 +18,9 @@ type config struct {
 	// Recent is a pointer so that an explicit 0 (hide the recent panel) is
 	// distinguishable from the key being absent.
 	Recent *int `json:"recent"`
+	// PRs is a pointer for the same reason: an explicit false (never shell out
+	// to the forge CLI) has to be distinguishable from the key being absent.
+	PRs *bool `json:"prs"`
 	// Protect lists branch-name globs `gitling tidy` must never delete. Unlike
 	// the other keys this one isn't a default that a flag overrides: --protect
 	// adds to it, because a config file saying "never delete release/*" should

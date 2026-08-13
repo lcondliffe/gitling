@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
@@ -38,6 +39,7 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 		},
 		HotFiles: jsonHotFiles(m.HotFiles),
 		Recent:   jsonRecents(m.Recent),
+		OpenPRs:  jsonPRs(m.PRs),
 	}
 
 	enc := json.NewEncoder(w)
@@ -54,6 +56,31 @@ type jsonModel struct {
 	Growth       jsonGrowth        `json:"growth"`
 	HotFiles     []jsonHotFile     `json:"hot_files"`
 	Recent       []jsonRecent      `json:"recent"`
+	OpenPRs      []jsonPR          `json:"open_prs"`
+}
+
+// jsonPR is one open pull request on the forge; the list is empty when there
+// is no forge CLI to ask.
+type jsonPR struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	Author  string `json:"author"`
+	Draft   bool   `json:"draft"`
+	Updated string `json:"updated"`
+}
+
+func jsonPRs(prs []forge.PR) []jsonPR {
+	out := make([]jsonPR, 0, len(prs))
+	for _, pr := range prs {
+		out = append(out, jsonPR{
+			Number:  pr.Number,
+			Title:   pr.Title,
+			Author:  pr.Author,
+			Draft:   pr.Draft,
+			Updated: pr.Updated.Format(time.RFC3339),
+		})
+	}
+	return out
 }
 
 // jsonRecent is one commit at the tip of HEAD. PR is null rather than 0 when no

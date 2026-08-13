@@ -15,6 +15,7 @@ import (
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
 	"github.com/lcondliffe/gitling/internal/cache"
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 	"github.com/lcondliffe/gitling/internal/render"
 )
@@ -24,6 +25,10 @@ const defaultDays = 14 * 7 // default range: last 14 weeks
 // defaultRecent is how many recent commits the dashboard lists by default:
 // enough to see what just landed without crowding out the other panels.
 const defaultRecent = 5
+
+// maxPRs caps the open pull requests listed; the panel is an "is anything
+// waiting on me" glance, not a queue.
+const maxPRs = 5
 
 // version is overwritten at build time via -ldflags "-X main.version=..." in
 // the release workflow. For `go install module@vX.Y.Z` builds (no ldflags), it
@@ -76,6 +81,7 @@ func main() {
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
+	prs := flag.Bool("prs", true, "show open pull requests (needs the forge CLI, e.g. gh)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
 	flag.Usage = usage
@@ -118,6 +124,9 @@ func main() {
 	}
 	if !explicit["layout"] && cfg.Layout != "" {
 		*layout = cfg.Layout
+	}
+	if !explicit["prs"] && cfg.PRs != nil {
+		*prs = *cfg.PRs
 	}
 
 	if *graph {
@@ -187,6 +196,7 @@ func main() {
 		recent:    *recent,
 		layout:    *layout,
 		width:     width,
+		prs:       *prs,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
@@ -215,6 +225,7 @@ Flags:
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
+  --prs=false      skip the open pull requests panel (needs a forge CLI: gh)
   --color <mode>   when to use color: always, never, auto (default auto)
   --no-color       plain output with no ANSI escape codes (alias for --color=never)
   --config <path>  path to config file (default $XDG_CONFIG_HOME/gitling/config.json
@@ -226,8 +237,8 @@ own flags; run "gitling tidy --help" for those. It is a dry run unless you
 pass --apply, and it is the only subcommand that changes anything.
 
 Config file (optional, JSON) may set defaults for "since", "color", "bucket",
-"recent", and "layout"; command-line flags always override it. --no-color
-overrides both.
+"recent", "layout", and "prs"; command-line flags always override it.
+--no-color overrides both.
 
 Run inside a git repository.
 `)
@@ -244,7 +255,8 @@ type options struct {
 	json      bool
 	recent    int
 	layout    string
-	width     int // terminal columns; 0 when unknown (piped or redirected)
+	width     int  // terminal columns; 0 when unknown (piped or redirected)
+	prs       bool // list open pull requests on the dashboard
 }
 
 func run(stdout io.Writer, o options) error {
@@ -281,6 +293,17 @@ func run(stdout io.Writer, o options) error {
 		}
 		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: o.width}, o.color)
 		return nil
+	}
+
+	// Open PRs come from the forge's CLI over the network, so the fetch runs
+	// alongside the history walk instead of in front of it. The channel is
+	// closed (yielding nil on receive) when the panel is off.
+	prs := make(chan []forge.PR, 1)
+	if o.prs && o.view == "dashboard" {
+		remote := repo.RemoteURL() // resolved here: Repo isn't used concurrently
+		go func() { prs <- forge.List(".", remote, maxPRs) }()
+	} else {
+		close(prs)
 	}
 
 	store := cache.New(gitDir, o.dateBasis)
@@ -373,6 +396,7 @@ func run(stdout io.Writer, o options) error {
 		}
 		m.Recent = commits
 	}
+	m.PRs = <-prs
 	if o.json {
 		return render.JSON(stdout, m, o.bucket, buckets)
 	}
