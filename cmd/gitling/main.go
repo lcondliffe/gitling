@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -82,6 +83,7 @@ func main() {
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	prs := flag.Bool("prs", true, "show open pull requests (needs the forge CLI, e.g. gh)")
+	fetchFlag := flag.Bool("fetch", false, "multi-repo overview: fetch each repo first for accurate ahead/behind")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
 	flag.Usage = usage
@@ -197,6 +199,7 @@ func main() {
 		layout:    *layout,
 		width:     width,
 		prs:       *prs,
+		fetch:     *fetchFlag,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
@@ -226,6 +229,8 @@ Flags:
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
   --prs=false      skip the open pull requests panel (needs a forge CLI: gh)
+  --fetch          multi-repo overview only: fetch each repo first, for
+                    accurate ahead/behind counts
   --color <mode>   when to use color: always, never, auto (default auto)
   --no-color       plain output with no ANSI escape codes (alias for --color=never)
   --config <path>  path to config file (default $XDG_CONFIG_HOME/gitling/config.json
@@ -240,7 +245,9 @@ Config file (optional, JSON) may set defaults for "since", "color", "bucket",
 "recent", "layout", and "prs"; command-line flags always override it.
 --no-color overrides both.
 
-Run inside a git repository.
+Run inside a git repository. Run in a directory whose subdirectories are git
+repositories to get a one-line-per-repo overview instead: branch, ahead/behind
+(from local refs; --fetch refreshes them), working-tree state, and open PRs.
 `)
 }
 
@@ -257,6 +264,7 @@ type options struct {
 	layout    string
 	width     int  // terminal columns; 0 when unknown (piped or redirected)
 	prs       bool // list open pull requests on the dashboard
+	fetch     bool // multi-repo overview: fetch each repo before probing it
 }
 
 func run(stdout io.Writer, o options) error {
@@ -268,7 +276,18 @@ func run(stdout io.Writer, o options) error {
 
 	repo, err := gitdata.Open(".")
 	if err != nil {
+		// Not inside a repo — but a directory of repos gets the multi-repo
+		// overview instead of an error. Dashboard view only: a drill-down
+		// asked about one repo's history, which doesn't exist here.
+		if o.view == "dashboard" {
+			if repos := childRepos("."); len(repos) > 0 {
+				return runRepos(stdout, o, repos)
+			}
+		}
 		return err
+	}
+	if o.fetch {
+		return errors.New("--fetch only applies to the multi-repo overview (run it in a directory of repositories)")
 	}
 	gitDir, err := repo.GitDir()
 	if err != nil {

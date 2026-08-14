@@ -46,6 +46,8 @@ gitling --json           # structured dashboard data for scripts/integrations
 gitling --date commit    # bucket by commit date instead of author date
 gitling --color=always   # always, never, or auto (default; honors NO_COLOR)
 gitling --config ~/gitling.json  # use an explicit config file
+gitling                  # in a directory of repos: one-line-per-repo overview
+gitling --fetch          # ...fetching each repo first for fresh ahead/behind
 ```
 
 Each drill-down is available as a subcommand or the matching `--flag`; naming
@@ -61,6 +63,17 @@ whatever that CLI already has. Today that means GitHub via
 `az repos`) are one entry in `internal/forge`. With no CLI installed, no
 network, or a remote gitling doesn't recognise, the panel just doesn't appear —
 `--prs=false` skips the lookup altogether.
+
+## Many repos
+
+Run `gitling` in a directory that isn't a repo but whose immediate
+subdirectories are (a `~/repo/*` layout) and it renders a one-line-per-repo
+overview instead of an error: current branch, ahead/behind upstream,
+working-tree state, and the open PR count. Ahead/behind comes from the local
+tracking refs — instant, but only as fresh as each repo's last fetch;
+`--fetch` fetches every repo first (failures fall back to local refs). PR
+counts follow the same rules as the dashboard panel and are skipped with
+`--prs=false`. Only immediate children are scanned, and nothing is written.
 
 ## Tidy
 
