@@ -66,6 +66,8 @@ network, or a remote gitling doesn't recognise, the panel just doesn't appear â€
 
 ## Many repos
 
+<img src="docs/screenshot-repos.png" alt="gitling repository overview: one line per repo, each with a status dot, name, current branch, ahead/behind counts, working-tree state, and open PR count" width="900">
+
 Run `gitling` in a directory that isn't a repo but whose immediate
 subdirectories are (a `~/repo/*` layout) and it renders a one-line-per-repo
 overview instead of an error: current branch, ahead/behind upstream,
