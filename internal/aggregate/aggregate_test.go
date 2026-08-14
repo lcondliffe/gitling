@@ -115,6 +115,11 @@ func TestTopContributorsCoalescesByName(t *testing.T) {
 	if got[0].Name != "Luke" || got[0].Commits != 2 {
 		t.Errorf("top = %+v, want Luke with 2 commits", got[0])
 	}
+	// The coalesced identity's email must be deterministic (sorted order picks
+	// the lexicographically first), not whichever map iteration found first.
+	if got[0].Email != "luke@personal" {
+		t.Errorf("email = %q, want luke@personal (deterministic pick)", got[0].Email)
+	}
 	if got[1].Name != "Bob" || got[1].Commits != 1 {
 		t.Errorf("second = %+v, want Bob with 1 commit", got[1])
 	}
