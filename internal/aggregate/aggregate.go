@@ -238,17 +238,25 @@ func (a *Aggregates) TopContributors(since, until time.Time, n int) []Contributo
 			perEmail[email] += c
 		}
 	}
+	// Emails are visited in sorted order so the email (and name casing) chosen
+	// for a coalesced identity is deterministic, not whichever one map
+	// iteration reached first — --json consumers key on it.
+	emails := make([]string, 0, len(perEmail))
+	for email := range perEmail {
+		emails = append(emails, email)
+	}
+	sort.Strings(emails)
 	byName := map[string]*Contributor{}
-	for email, c := range perEmail {
+	for _, email := range emails {
 		name := a.AuthorNames[email]
 		if name == "" {
 			name = email
 		}
 		key := strings.ToLower(strings.TrimSpace(name))
 		if existing, ok := byName[key]; ok {
-			existing.Commits += c
+			existing.Commits += perEmail[email]
 		} else {
-			byName[key] = &Contributor{Email: email, Name: name, Commits: c}
+			byName[key] = &Contributor{Email: email, Name: name, Commits: perEmail[email]}
 		}
 	}
 	out := make([]Contributor, 0, len(byName))
