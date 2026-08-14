@@ -471,13 +471,13 @@ func Branches(w io.Writer, m BranchesModel, color bool) {
 
 	nameW, trackW, dateW := 0, 0, 0
 	for _, b := range m.Branches {
-		if n := runeLen(b.Name); n > nameW {
+		if n := cellLen(b.Name); n > nameW {
 			nameW = n
 		}
-		if n := runeLen(branchTrack(b)); n > trackW {
+		if n := cellLen(branchTrack(b)); n > trackW {
 			trackW = n
 		}
-		if n := runeLen(humanAgo(b.LastCommit, m.Now)); n > dateW {
+		if n := cellLen(humanAgo(b.LastCommit, m.Now)); n > dateW {
 			dateW = n
 		}
 	}
@@ -504,15 +504,15 @@ func Branches(w io.Writer, m BranchesModel, color bool) {
 			marker = p.c(cAccent, "*") + " "
 		}
 		name := truncate(b.Name, nameW)
-		namePad := strings.Repeat(" ", nameW-runeLen(name))
+		namePad := strings.Repeat(" ", nameW-cellLen(name))
 		nameCol := name
 		if b.IsHead {
 			nameCol = p.c(cBright, name)
 		}
 		track := branchTrack(b)
-		trackPad := strings.Repeat(" ", trackW-runeLen(track))
+		trackPad := strings.Repeat(" ", trackW-cellLen(track))
 		date := humanAgo(b.LastCommit, m.Now)
-		datePad := strings.Repeat(" ", dateW-runeLen(date))
+		datePad := strings.Repeat(" ", dateW-cellLen(date))
 
 		line := fmt.Sprintf("%s%s%s   %s%s   %s%s   %s",
 			marker, nameCol, namePad,
@@ -850,7 +850,7 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int
 	}
 	nameW, countW := 0, 0
 	for _, c := range cs {
-		if n := runeLen(c.Name); n > nameW {
+		if n := cellLen(c.Name); n > nameW {
 			nameW = n
 		}
 		if n := len(strconv.Itoa(c.Commits)); n > countW {
@@ -865,7 +865,7 @@ func (p palette) contributors(w io.Writer, cs []aggregate.Contributor, width int
 	maxC := cs[0].Commits
 	for _, c := range cs {
 		name := truncate(c.Name, nameW)
-		pad := strings.Repeat(" ", nameW-runeLen(name))
+		pad := strings.Repeat(" ", nameW-cellLen(name))
 		count := p.c(cLabel, fmt.Sprintf("%*d", countW, c.Commits))
 		fmt.Fprintf(w, "  %s%s   %s   %s\n", name, pad, p.bar(c.Commits, maxC, barW), count)
 	}
@@ -904,19 +904,19 @@ func (p palette) bar(count, max, w int) string {
 func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, width int) {
 	hashW, prW, authorW, agoW, subjectW := 0, 0, 0, 0, 0
 	for _, c := range cs {
-		if n := runeLen(c.Short); n > hashW {
+		if n := cellLen(c.Short); n > hashW {
 			hashW = n
 		}
-		if n := runeLen(c.Subject); n > subjectW {
+		if n := cellLen(c.Subject); n > subjectW {
 			subjectW = n
 		}
-		if n := runeLen(prLabel(c)); n > prW {
+		if n := cellLen(prLabel(c)); n > prW {
 			prW = n
 		}
-		if n := runeLen(c.Author); n > authorW {
+		if n := cellLen(c.Author); n > authorW {
 			authorW = n
 		}
-		if n := runeLen(humanAgo(c.Time, now)); n > agoW {
+		if n := cellLen(humanAgo(c.Time, now)); n > agoW {
 			agoW = n
 		}
 	}
@@ -941,19 +941,19 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 
 	for _, c := range cs {
 		var b strings.Builder
-		b.WriteString("  " + p.c(cLabel, c.Short) + strings.Repeat(" ", hashW-runeLen(c.Short)) + "  ")
+		b.WriteString("  " + p.c(cLabel, c.Short) + strings.Repeat(" ", hashW-cellLen(c.Short)) + "  ")
 		if prW > 0 {
 			pr := prLabel(c)
 			code := cAccent
 			if pr == "" {
 				pr, code = "·", cLabel // a placeholder keeps the subject column aligned
 			}
-			b.WriteString(p.c(code, pr) + strings.Repeat(" ", prW-runeLen(pr)) + "  ")
+			b.WriteString(p.c(code, pr) + strings.Repeat(" ", prW-cellLen(pr)) + "  ")
 		}
 		subject := truncate(c.Subject, subjectW)
-		b.WriteString(subject + strings.Repeat(" ", subjectW-runeLen(subject)) + "  ")
+		b.WriteString(subject + strings.Repeat(" ", subjectW-cellLen(subject)) + "  ")
 		author := truncate(c.Author, authorW)
-		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-runeLen(author)) + "  ")
+		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-cellLen(author)) + "  ")
 		b.WriteString(p.c(cLabel, humanAgo(c.Time, now)))
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
@@ -971,16 +971,16 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	numW, authorW, agoW, titleW := 0, 0, 0, 0
 	for _, pr := range prs {
-		if n := runeLen(prNumber(pr)); n > numW {
+		if n := cellLen(prNumber(pr)); n > numW {
 			numW = n
 		}
-		if n := runeLen(prTitleText(pr)); n > titleW {
+		if n := cellLen(prTitleText(pr)); n > titleW {
 			titleW = n
 		}
-		if n := runeLen(pr.Author); n > authorW {
+		if n := cellLen(pr.Author); n > authorW {
 			authorW = n
 		}
-		if n := runeLen(humanAgo(pr.Updated, now)); n > agoW {
+		if n := cellLen(humanAgo(pr.Updated, now)); n > agoW {
 			agoW = n
 		}
 	}
@@ -1000,11 +1000,11 @@ func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	for _, pr := range prs {
 		var b strings.Builder
 		num := prNumber(pr)
-		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-runeLen(num)) + "  ")
+		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-cellLen(num)) + "  ")
 		title := truncate(prTitleText(pr), titleW)
-		b.WriteString(title + strings.Repeat(" ", titleW-runeLen(title)) + "  ")
+		b.WriteString(title + strings.Repeat(" ", titleW-cellLen(title)) + "  ")
 		author := truncate(pr.Author, authorW)
-		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-runeLen(author)) + "  ")
+		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-cellLen(author)) + "  ")
 		b.WriteString(p.c(cLabel, humanAgo(pr.Updated, now)))
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
@@ -1212,17 +1212,19 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func runeLen(s string) int { return len([]rune(s)) }
-
+// truncate shortens s to at most max terminal cells, marking the cut with an
+// ellipsis. Like clipVisible it drops a double-width cluster whole rather than
+// splitting it, so the result may be one cell short of max. A max of 1 yields
+// the bare ellipsis (a wide rune would not fit in the cell), and a
+// non-positive max yields the empty string.
 func truncate(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
+	if cellLen(s) <= max {
 		return s
 	}
-	if max <= 1 {
-		return string(r[:max])
+	if max <= 0 {
+		return ""
 	}
-	return string(r[:max-1]) + "…"
+	return head(s, max-1) + "…"
 }
 
 // barWidthFor scales a fill-bar to fit within width, given overhead columns
@@ -1263,8 +1265,8 @@ func pathBudget(width, overhead int) int {
 	return b
 }
 
-// elidePath shortens path to at most maxLen runes, keeping the final path
-// segment (the filename) fully visible and eliding from the middle of the
+// elidePath shortens path to at most maxLen terminal cells, keeping the final
+// path segment (the filename) fully visible and eliding from the middle of the
 // leading directory portion — long terraform-style paths stay readable
 // instead of just running off the line. maxLen <= 0 means unbounded: the
 // path is returned unchanged (used when the terminal width is unknown, so
@@ -1273,8 +1275,7 @@ func elidePath(path string, maxLen int) string {
 	if maxLen <= 0 {
 		return path
 	}
-	r := []rune(path)
-	if len(r) <= maxLen {
+	if cellLen(path) <= maxLen {
 		return path
 	}
 	const ellipsis = "…"
@@ -1282,14 +1283,28 @@ func elidePath(path string, maxLen int) string {
 	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
 		base = path[idx+1:]
 	}
-	baseRunes := []rune(base)
-	if len(baseRunes) >= maxLen-1 {
+	if cellLen(base) >= maxLen-1 {
 		// Even the filename alone doesn't fit; truncate its tail.
 		return truncate(base, maxLen)
 	}
-	headBudget := maxLen - len(baseRunes) - runeLen(ellipsis)
+	headBudget := maxLen - cellLen(base) - cellLen(ellipsis)
 	if headBudget < 0 {
 		headBudget = 0
 	}
-	return string(r[:headBudget]) + ellipsis + base
+	return head(path, headBudget) + ellipsis + base
+}
+
+// head returns the longest prefix of s fitting in w terminal cells. A
+// double-width cluster that would straddle the limit is dropped whole.
+func head(s string, w int) string {
+	n := 0
+	for i := 0; i < len(s); {
+		cw, next := stepCell(s, i)
+		if n+cw > w {
+			return s[:i]
+		}
+		n += cw
+		i = next
+	}
+	return s
 }

@@ -39,10 +39,10 @@ func Repos(w io.Writer, m ReposModel, color bool) {
 
 	nameW, branchW, trackW, dirtyW := 0, 0, 0, 0
 	for _, r := range m.Rows {
-		nameW = max(nameW, runeLen(r.Name))
-		branchW = max(branchW, runeLen(r.Vitals.Branch))
-		trackW = max(trackW, runeLen(repoTrack(r.Vitals)))
-		dirtyW = max(dirtyW, runeLen(repoDirty(r.Vitals)))
+		nameW = max(nameW, cellLen(r.Name))
+		branchW = max(branchW, cellLen(r.Vitals.Branch))
+		trackW = max(trackW, cellLen(repoTrack(r.Vitals)))
+		dirtyW = max(dirtyW, cellLen(repoDirty(r.Vitals)))
 	}
 	// One repo on a marathon-named branch shouldn't push every other column
 	// off to the right.
@@ -69,13 +69,13 @@ func Repos(w io.Writer, m ReposModel, color bool) {
 			dotColor = cAmber
 		}
 		name := truncate(r.Name, nameW)
-		namePad := strings.Repeat(" ", nameW-runeLen(name))
+		namePad := strings.Repeat(" ", nameW-cellLen(name))
 		branch := truncate(v.Branch, branchW)
-		branchPad := strings.Repeat(" ", branchW-runeLen(branch))
+		branchPad := strings.Repeat(" ", branchW-cellLen(branch))
 		track := repoTrack(v)
-		trackPad := strings.Repeat(" ", trackW-runeLen(track))
+		trackPad := strings.Repeat(" ", trackW-cellLen(track))
 		dirty := repoDirty(v)
-		dirtyPad := strings.Repeat(" ", dirtyW-runeLen(dirty))
+		dirtyPad := strings.Repeat(" ", dirtyW-cellLen(dirty))
 
 		dirtyCol := p.c(cLabel, dirty)
 		if v.DirtyFiles > 0 {

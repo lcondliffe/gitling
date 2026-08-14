@@ -1,20 +1,19 @@
 package render
 
-import (
-	"strings"
-	"unicode/utf8"
-)
+import "strings"
 
 // Box drawing for the dashboard grid.
 //
 // Every helper here measures *visible* width — the number of printable cells a
 // string occupies once ANSI SGR sequences are discarded. Panel content arrives
-// already colored, so plain len() (bytes) and even runeLen() (runes, counting
-// escape characters) would both overshoot and blow the right border out.
+// already colored, so plain len() (bytes) and even cellLen() (cells, but
+// counting the escape characters too) would both overshoot and blow the right
+// border out.
 //
-// Width is counted in runes, matching the rest of the package: gitling's glyph
-// set (box drawing, block elements, ■/□/·) is single-width in practice, so no
-// East Asian width table is carried around for it.
+// Width is counted in terminal cells, matching the rest of the package: panel
+// content includes repository data (author names, commit subjects, paths), so
+// double-width CJK and emoji have to be measured as the two cells they occupy.
+// See cellwidth.go.
 
 const (
 	boxTL, boxTR, boxBL, boxBR = "╭", "╮", "╰", "╯"
@@ -30,9 +29,9 @@ func visibleLen(s string) int {
 			i = skipEscape(s, i)
 			continue
 		}
-		_, size := utf8.DecodeRuneInString(s[i:])
-		i += size
-		n++
+		w, next := stepCell(s, i)
+		n += w
+		i = next
 	}
 	return n
 }
@@ -76,13 +75,16 @@ func clipVisible(s string, max int) string {
 			i = j
 			continue
 		}
-		if seen == max-1 {
-			break // leave room for the ellipsis
+		// Leave room for the ellipsis, which is one cell. A double-width
+		// cluster that would straddle the cut is dropped whole, so the result
+		// can come in a cell short; callers pad to width.
+		w, next := stepCell(s, i)
+		if seen+w > max-1 {
+			break
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		b.WriteRune(r)
-		i += size
-		seen++
+		b.WriteString(s[i:next])
+		seen += w
+		i = next
 	}
 	b.WriteString(ellipsis)
 	if colored {
@@ -126,11 +128,11 @@ func (p palette) box(title string, content []string, innerW int) []string {
 func boxTop(title string, innerW int) string {
 	title = strings.TrimSpace(title)
 	// "╭" + "─ " + title + " " + fill + "╮": the fixed parts cost 3 of innerW.
-	fill := innerW - 3 - runeLen(title)
+	fill := innerW - 3 - cellLen(title)
 	if title == "" || fill < 0 {
 		if title != "" && innerW > 4 {
 			title = truncate(title, innerW-3)
-			fill = innerW - 3 - runeLen(title)
+			fill = innerW - 3 - cellLen(title)
 		} else {
 			return boxTL + strings.Repeat(boxH, innerW) + boxTR
 		}
