@@ -64,6 +64,33 @@ func TestGraphNoCommitsShowsCompactCountsMessage(t *testing.T) {
 	}
 }
 
+func TestGraphCountsDropZeroBucketsAndPack(t *testing.T) {
+	now := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	m := GraphModel{RangeLabel: "last 4 days", Bucket: "day", TotalCommits: 8, Now: now, Width: 100}
+	for i, n := range []int{0, 3, 0, 5} {
+		d := now.AddDate(0, 0, -3+i)
+		m.Buckets = append(m.Buckets, aggregate.PeriodCount{Start: d, End: d, Count: n})
+	}
+
+	var buf bytes.Buffer
+	Graph(&buf, m, false)
+	out := buf.String()
+	if strings.Contains(out, "2024-06-12") || strings.Contains(out, "2024-06-14") {
+		t.Errorf("empty buckets should be dropped:\n%s", out)
+	}
+	if !strings.Contains(out, "2024-06-13 3   2024-06-15 5") {
+		t.Errorf("counts should pack across the width:\n%s", out)
+	}
+
+	// Piped output stays one per line so it can still be grepped.
+	m.Width = 0
+	buf.Reset()
+	Graph(&buf, m, false)
+	if !strings.Contains(buf.String(), "    2024-06-13 3\n    2024-06-15 5\n") {
+		t.Errorf("unknown width should list one bucket per line:\n%s", buf.String())
+	}
+}
+
 func TestChurnRanksFilesWithCountsAndSummary(t *testing.T) {
 	var buf bytes.Buffer
 	Churn(&buf, ChurnModel{

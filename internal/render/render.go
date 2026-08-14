@@ -355,20 +355,37 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  "+p.c(cLabel, "counts"))
-	if len(m.Buckets) == 0 || m.TotalCommits == 0 {
+	// Empty buckets are dropped and the rest are packed across the terminal:
+	// a day-bucketed quarter is ~90 rows, nearly all of them zeros the heatmap
+	// and the chart above have already shown.
+	cells := make([]string, 0, len(m.Buckets))
+	cellW := 0
+	for _, b := range m.Buckets {
+		if b.Count == 0 {
+			continue
+		}
+		cell := p.c(cLabel, periodLabel(b, m.Bucket)) + " " + strconv.Itoa(b.Count)
+		if n := visibleLen(cell); n > cellW {
+			cellW = n
+		}
+		cells = append(cells, cell)
+	}
+	if len(cells) == 0 {
 		fmt.Fprintln(w, "    "+p.c(cLabel, "no commits in range"))
 		fmt.Fprintln(w)
 		return
 	}
-	countW := 0
-	for _, b := range m.Buckets {
-		if n := len(strconv.Itoa(b.Count)); n > countW {
-			countW = n
+	// An unknown width (piped) stays one per line, as the other panels do, so
+	// `gitling graph | grep` keeps working.
+	lines := cells
+	if m.Width > 0 {
+		for i, c := range cells {
+			cells[i] = padVisible(c, cellW)
 		}
+		lines = packParts(cells, m.Width-4, 3)
 	}
-	for _, b := range m.Buckets {
-		count := p.c(cLabel, fmt.Sprintf("%*d", countW, b.Count))
-		fmt.Fprintf(w, "    %s   %s\n", count, periodLabel(b, m.Bucket))
+	for _, line := range lines {
+		fmt.Fprintln(w, "    "+strings.TrimRight(line, " "))
 	}
 	fmt.Fprintln(w)
 }
