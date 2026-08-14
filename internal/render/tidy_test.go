@@ -104,8 +104,8 @@ func TestTidyResultNeverExceedsTerminalWidth(t *testing.T) {
 			Failed: map[string]error{plan.Candidates[0].Branch.Name: errors.New("not fully merged")},
 		}, false)
 		for _, line := range strings.Split(buf.String(), "\n") {
-			if runeLen(line) > width {
-				t.Errorf("width %d: line of %d columns: %q", width, runeLen(line), line)
+			if cellLen(line) > width {
+				t.Errorf("width %d: line of %d columns: %q", width, cellLen(line), line)
 			}
 		}
 	}
@@ -201,8 +201,8 @@ func TestTidyNeverExceedsTerminalWidth(t *testing.T) {
 		var buf bytes.Buffer
 		Tidy(&buf, TidyModel{Plan: plan, Now: goldenNow, Width: width}, false)
 		for _, line := range strings.Split(buf.String(), "\n") {
-			if runeLen(line) > width {
-				t.Errorf("width %d: line of %d columns: %q", width, runeLen(line), line)
+			if cellLen(line) > width {
+				t.Errorf("width %d: line of %d columns: %q", width, cellLen(line), line)
 			}
 		}
 	}

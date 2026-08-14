@@ -969,16 +969,16 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	numW, authorW, agoW, titleW := 0, 0, 0, 0
 	for _, pr := range prs {
-		if n := runeLen(prNumber(pr)); n > numW {
+		if n := cellLen(prNumber(pr)); n > numW {
 			numW = n
 		}
-		if n := runeLen(prTitleText(pr)); n > titleW {
+		if n := cellLen(prTitleText(pr)); n > titleW {
 			titleW = n
 		}
-		if n := runeLen(pr.Author); n > authorW {
+		if n := cellLen(pr.Author); n > authorW {
 			authorW = n
 		}
-		if n := runeLen(humanAgo(pr.Updated, now)); n > agoW {
+		if n := cellLen(humanAgo(pr.Updated, now)); n > agoW {
 			agoW = n
 		}
 	}
@@ -998,11 +998,11 @@ func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	for _, pr := range prs {
 		var b strings.Builder
 		num := prNumber(pr)
-		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-runeLen(num)) + "  ")
+		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-cellLen(num)) + "  ")
 		title := truncate(prTitleText(pr), titleW)
-		b.WriteString(title + strings.Repeat(" ", titleW-runeLen(title)) + "  ")
+		b.WriteString(title + strings.Repeat(" ", titleW-cellLen(title)) + "  ")
 		author := truncate(pr.Author, authorW)
-		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-runeLen(author)) + "  ")
+		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-cellLen(author)) + "  ")
 		b.WriteString(p.c(cLabel, humanAgo(pr.Updated, now)))
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}

@@ -53,10 +53,10 @@ func Tidy(w io.Writer, m TidyModel, color bool) {
 
 	nameW, ageW := 0, 0
 	for _, c := range m.Plan.Candidates {
-		if n := runeLen(c.Branch.Name); n > nameW {
+		if n := cellLen(c.Branch.Name); n > nameW {
 			nameW = n
 		}
-		if n := runeLen(humanAgo(c.Branch.LastCommit, m.Now)); n > ageW {
+		if n := cellLen(humanAgo(c.Branch.LastCommit, m.Now)); n > ageW {
 			ageW = n
 		}
 	}
@@ -79,7 +79,7 @@ func Tidy(w io.Writer, m TidyModel, color bool) {
 			// The flag is the honest signal of how much git itself vouches for
 			// the deletion, so it keeps its own colour and is never the part
 			// that gets cut.
-			if width := m.Width - 5 - runeLen(flag); width > 0 && runeLen(heading) > width {
+			if width := m.Width - 5 - cellLen(flag); width > 0 && cellLen(heading) > width {
 				heading = truncate(heading, width)
 			}
 			fmt.Fprintln(w, "  "+p.c(cLabel, heading)+"   "+p.tidyFlag(c.Force))
@@ -163,9 +163,9 @@ func tidyMaxNameWidth(width int) int {
 
 func (p palette) tidyRow(c tidy.Candidate, m TidyModel, nameW, ageW int) string {
 	name := truncate(c.Branch.Name, nameW)
-	pad := strings.Repeat(" ", nameW-runeLen(name))
+	pad := strings.Repeat(" ", nameW-cellLen(name))
 	age := humanAgo(c.Branch.LastCommit, m.Now)
-	agePad := strings.Repeat(" ", max(ageW-runeLen(age), 0))
+	agePad := strings.Repeat(" ", max(ageW-cellLen(age), 0))
 
 	row := fmt.Sprintf("%s%s   %s%s", name, pad, p.c(cLabel, age), agePad)
 	if tip := c.Branch.Tip; tip != "" {
@@ -222,7 +222,7 @@ func (p palette) tidyProtected(w io.Writer, m TidyModel) {
 // width. Colour is applied after truncation so an escape sequence is never cut
 // in half.
 func (p palette) tidyLine(w io.Writer, width int, color, text string) {
-	if width > 0 && runeLen(text) > width-2 {
+	if width > 0 && cellLen(text) > width-2 {
 		text = truncate(text, width-2)
 	}
 	fmt.Fprintln(w, "  "+p.c(color, text))
