@@ -211,10 +211,11 @@ func (r *Repo) IsAncestor(maybeAncestor, descendant string) bool {
 	return err == nil
 }
 
-// Vitals gathers the current branch / tracking / working-tree state. Every
-// query degrades on its own — a repo with no upstream, no stashes, or no
-// remote simply leaves those fields zero — so there is nothing to report.
-func (r *Repo) Vitals() Vitals {
+// Status gathers the current branch / tracking / working-tree state: the
+// cheap subset of Vitals (three git processes) that the multi-repo overview
+// probes once per repo. Every query degrades on its own — a repo with no
+// upstream or no commits simply leaves those fields zero.
+func (r *Repo) Status() Vitals {
 	var v Vitals
 
 	if out, err := r.run("symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
@@ -241,6 +242,13 @@ func (r *Repo) Vitals() Vitals {
 		v.DirtyFiles = countLines(out)
 		v.Staged, v.Modified, v.Untracked, v.Conflicts = parseStatusCounts(out)
 	}
+	return v
+}
+
+// Vitals gathers the full repo state for the dashboard: Status plus stashes,
+// in-progress operations, fetch age, and branch health.
+func (r *Repo) Vitals() Vitals {
+	v := r.Status()
 	// %ct on the stash entries' commits: the stash stack is newest-first, so the
 	// last line is the oldest entry.
 	if out, err := r.run("stash", "list", "--format=%ct"); err == nil {
