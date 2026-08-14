@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/lcondliffe/gitling/internal/gitdata"
@@ -16,6 +17,9 @@ type RepoRow struct {
 	Name   string
 	Vitals gitdata.Vitals
 	PRs    int
+	// MorePRs marks a count that hit the lookup cap: the repo has at least
+	// PRs open, not exactly PRs.
+	MorePRs bool
 }
 
 // ReposModel is everything the multi-repo overview needs to draw itself.
@@ -84,7 +88,11 @@ func Repos(w io.Writer, m ReposModel, color bool) {
 			p.repoTrack(v), trackPad,
 			dirtyCol, dirtyPad)
 		if r.PRs > 0 {
-			line += fmt.Sprintf("   %s", p.c(cLabel, fmt.Sprintf("%d %s", r.PRs, plural(r.PRs, "PR", "PRs"))))
+			count := strconv.Itoa(r.PRs)
+			if r.MorePRs {
+				count += "+"
+			}
+			line += fmt.Sprintf("   %s", p.c(cLabel, count+" "+plural(r.PRs, "PR", "PRs")))
 		}
 		fmt.Fprintln(w, "  "+strings.TrimRight(line, " "))
 	}

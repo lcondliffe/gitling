@@ -72,6 +72,7 @@ func runRepos(stdout io.Writer, o options, names []string) error {
 			row := &render.RepoRow{Name: name, Vitals: repo.Status()}
 			if o.prs {
 				row.PRs = len(forge.List(name, repo.RemoteURL(), overviewPRLimit))
+				row.MorePRs = row.PRs == overviewPRLimit
 			}
 			rows[i] = row
 		}()
