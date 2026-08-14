@@ -800,7 +800,9 @@ func (p palette) heatmap(w io.Writer, m Model) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
-	summary := fmt.Sprintf("%d commits in range · streak: %d days", m.TotalCommits, m.Streak)
+	summary := fmt.Sprintf("%d %s in range · streak: %d %s",
+		m.TotalCommits, plural(m.TotalCommits, "commit", "commits"),
+		m.Streak, plural(m.Streak, "day", "days"))
 	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
 }
 
