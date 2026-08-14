@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/lcondliffe/gitling/compare/v0.5.5...v0.6.0) (2026-08-14)
+
+
+### Features
+
+* multi-repo overview when run in a directory of repos ([#43](https://github.com/lcondliffe/gitling/issues/43)) ([90fa67c](https://github.com/lcondliffe/gitling/commit/90fa67cc5b6a45f8ca3c1dcfe0f9bdb629afe08a))
+* show open pull requests on the dashboard ([#40](https://github.com/lcondliffe/gitling/issues/40)) ([db1c9d3](https://github.com/lcondliffe/gitling/commit/db1c9d3b74d6885a56b9ac405264a6e1bbd9cd1b))
+
+
+### Bug Fixes
+
+* deterministic contributor email and singular activity footer ([#45](https://github.com/lcondliffe/gitling/issues/45)) ([7df6edf](https://github.com/lcondliffe/gitling/commit/7df6edf3b8904422619d99509690dc129d023174))
+* **render:** measure panel width in terminal cells, not runes ([#44](https://github.com/lcondliffe/gitling/issues/44)) ([2334c9e](https://github.com/lcondliffe/gitling/commit/2334c9e9c30c2f9b228d62b3ceb49a6d767767f0))
+* trim the graph counts list ([#41](https://github.com/lcondliffe/gitling/issues/41)) ([5a2afad](https://github.com/lcondliffe/gitling/commit/5a2afad76f243d0ebc2f8aab38cabf2821546a63))
+
 ## [0.5.5](https://github.com/lcondliffe/gitling/compare/v0.5.4...v0.5.5) (2026-08-12)
 
 
