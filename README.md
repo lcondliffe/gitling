@@ -30,7 +30,7 @@ sure it's on your `PATH`. Prebuilt binaries are on the
 
 ## Usage
 
-```
+```sh
 gitling                  # default dashboard (last 14 weeks)
 gitling --since 30d      # override the range for all sections (d, w, mo, y)
 gitling graph --since 1y # focused activity drill-down
@@ -82,7 +82,7 @@ counts follow the same rules as the dashboard panel and are skipped with
 `gitling tidy` is the one subcommand that changes anything. It finds the local
 branches you're done with and, on request, deletes them:
 
-```
+```sh
 gitling tidy                  # dry run over merged + upstream-gone branches
 gitling tidy --apply          # delete them, prompting once first
 gitling tidy --merged         # narrow to branches merged into the default branch

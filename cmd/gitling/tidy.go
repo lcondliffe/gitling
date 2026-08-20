@@ -307,8 +307,13 @@ func (s *staleFlag) IsBoolFlag() bool { return true }
 func (s *staleFlag) String() string   { return s.value }
 
 func (s *staleFlag) Set(v string) error {
+	// The flag package hands a bare --stale the literal "true", and --stale=false
+	// is the boolean negation it looks like: don't select the stale category.
+	if v == "false" {
+		s.set, s.value = false, ""
+		return nil
+	}
 	s.set = true
-	// The flag package hands a bare --stale the literal "true".
 	if v != "true" {
 		s.value = v
 	}

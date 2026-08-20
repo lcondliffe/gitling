@@ -161,6 +161,10 @@ func TestStaleFlag(t *testing.T) {
 		wantValue: "",
 		wantRest:  []string{"180d"},
 	}, {
+		name:    "explicit false negates, like any boolean",
+		args:    []string{"--stale=false"},
+		wantSet: false,
+	}, {
 		name:      "explicit true reads as bare",
 		args:      []string{"--stale=true"},
 		wantSet:   true,
