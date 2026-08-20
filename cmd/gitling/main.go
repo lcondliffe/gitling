@@ -334,6 +334,11 @@ func run(stdout io.Writer, o options) error {
 	// Only walk history when there are commits. An empty repo renders vitals
 	// plus empty panels.
 	head, headErr := repo.Head()
+	if headErr != nil {
+		// No HEAD, so no history to report — a cache left over from before the
+		// ref went away would render totals for commits that are gone.
+		agg = aggregate.New()
+	}
 	if headErr == nil {
 		revRange := "" // empty == full history
 		switch {
