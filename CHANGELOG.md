@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.1](https://github.com/lcondliffe/gitling/compare/v0.6.0...v0.6.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* drop the cached aggregate when HEAD is gone ([#46](https://github.com/lcondliffe/gitling/issues/46)) ([d4cb3a4](https://github.com/lcondliffe/gitling/commit/d4cb3a4682b824c924f38971e5146df51905a3dc))
+* **tidy:** treat --stale=false as a negation ([#48](https://github.com/lcondliffe/gitling/issues/48)) ([b31f702](https://github.com/lcondliffe/gitling/commit/b31f702eeaa3aa03ad10f98aec3243714b40726d))
+
+
+### Performance
+
+* **aggregate:** prefix-sum BuildGrowth instead of rescanning days ([#47](https://github.com/lcondliffe/gitling/issues/47)) ([517b602](https://github.com/lcondliffe/gitling/commit/517b602a851aecb287a4dde3c16cde1116236eaf))
+
 ## [0.6.0](https://github.com/lcondliffe/gitling/compare/v0.5.5...v0.6.0) (2026-08-14)
 
 
