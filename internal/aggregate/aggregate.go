@@ -309,13 +309,25 @@ func (a *Aggregates) HotFiles(since, until time.Time, n int) []FileChurn {
 // 6 months ago, and Spark — cumulative LOC sampled across those 6 months, which
 // render draws as a multi-row min-max bar chart (see render.growthChart).
 func (a *Aggregates) BuildGrowth(until time.Time) Growth {
+	days, net := a.netPrefix()
+	// netUpTo sums net line delta for all days on or before t, via binary
+	// search over the prefix sums.
+	netUpTo := func(t time.Time) int {
+		key := t.Format(dayFmt)
+		i := sort.SearchStrings(days, key)
+		if i < len(days) && days[i] == key {
+			i++ // the day itself is included
+		}
+		return net[i]
+	}
+
 	now := truncateDay(until)
-	g := Growth{TotalLOC: clampZero(a.netUpTo(now))}
+	g := Growth{TotalLOC: clampZero(netUpTo(now))}
 
 	baseDay := now.AddDate(0, -6, 0)
-	if a.hasDataBefore(baseDay) {
-		base := a.netUpTo(baseDay)
-		cur := a.netUpTo(now)
+	if len(days) > 0 && days[0] < baseDay.Format(dayFmt) {
+		base := netUpTo(baseDay)
+		cur := netUpTo(now)
 		if base > 0 {
 			g.Pct = float64(cur-base) / float64(base) * 100
 			g.HasPct = true
@@ -337,31 +349,26 @@ func (a *Aggregates) BuildGrowth(until time.Time) Growth {
 		if d.After(now) {
 			d = now
 		}
-		g.Spark = append(g.Spark, clampZero(a.netUpTo(d)))
+		g.Spark = append(g.Spark, clampZero(netUpTo(d)))
 	}
 	return g
 }
 
-// netUpTo sums net line delta for all days on or before t.
-func (a *Aggregates) netUpTo(t time.Time) int {
-	key := t.Format(dayFmt)
-	sum := 0
-	for day, b := range a.Days {
-		if day <= key {
-			sum += b.Insertions - b.Deletions
-		}
-	}
-	return sum
-}
-
-func (a *Aggregates) hasDataBefore(t time.Time) bool {
-	key := t.Format(dayFmt)
+// netPrefix returns the day keys in chronological order (they sort lexically)
+// alongside prefix sums of net line delta, where net[i] covers days[:i]. One
+// pass replaces a full map scan per sample point.
+func (a *Aggregates) netPrefix() (days []string, net []int) {
+	days = make([]string, 0, len(a.Days))
 	for day := range a.Days {
-		if day < key {
-			return true
-		}
+		days = append(days, day)
 	}
-	return false
+	sort.Strings(days)
+	net = make([]int, len(days)+1)
+	for i, day := range days {
+		b := a.Days[day]
+		net[i+1] = net[i] + b.Insertions - b.Deletions
+	}
+	return days, net
 }
 
 func truncateDay(t time.Time) time.Time {
