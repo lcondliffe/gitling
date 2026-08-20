@@ -101,6 +101,16 @@ func TestRunCachePaths(t *testing.T) {
 			want: 3,
 		},
 		{
+			name: "cached history whose HEAD went away reports nothing",
+			setup: func(t *testing.T) string {
+				dir := newRepo(t, 3)
+				totalCommits(t, dir)
+				git(t, dir, "update-ref", "-d", "HEAD")
+				return dir
+			},
+			want: 0,
+		},
+		{
 			name:  "empty repo has no HEAD to walk",
 			setup: func(t *testing.T) string { return newRepo(t, 0) },
 			want:  0,
