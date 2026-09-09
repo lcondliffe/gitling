@@ -21,6 +21,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Preview binaries must be the PR head, not GitHub's synthetic merge.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -45,3 +48,15 @@ jobs:
 
       - name: build
         run: go build ./cmd/gitling
+
+      - name: Upload PR preview
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: gitling-pr-${{ github.event.pull_request.number }}-${{ runner.os }}-${{ runner.arch }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            gitling
+            gitling.exe
+          if-no-files-found: error
+          retention-days: 14
+          archive: true

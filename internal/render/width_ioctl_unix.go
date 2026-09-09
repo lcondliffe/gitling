@@ -21,10 +21,15 @@ type winsize struct {
 // returns (0, false) when f isn't a terminal (piped/redirected output) or
 // the ioctl otherwise fails.
 func ioctlWinsize(f *os.File) (int, bool) {
+	_, cols, ok := terminalSize(f)
+	return cols, ok && cols > 0
+}
+
+func terminalSize(f *os.File) (rows, cols int, ok bool) {
 	var ws winsize
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), tiocgwinsz, uintptr(unsafe.Pointer(&ws)))
-	if errno != 0 || ws.Col == 0 {
-		return 0, false
+	if errno != 0 {
+		return 0, 0, false
 	}
-	return int(ws.Col), true
+	return int(ws.Row), int(ws.Col), true
 }

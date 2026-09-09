@@ -1,6 +1,8 @@
 
-ACTIVITY GRAPH  ·  last 10 weeks · week
+ACTIVITY GRAPH · last 10 weeks · week
 
+requested: 2024-04-07..Jun 15
+HEAD non-merge; author dates
   · · · · · · · · · ·
   ░ ░ ░ ░ ░ ░ ░ ░ ░ ░
   ░ ░ ░ ░ ░ ░ ░ ░ ░ ░
@@ -8,7 +10,10 @@ ACTIVITY GRAPH  ·  last 10 weeks · week
   █ █ █ █ █ █ █ █ █ █
   ▒ ▒ ▒ ▒ ▒ ▒ ▒ ▒ ▒ ▒
   · · · · · · · · · ·
-  180 commits in range · streak: 3 days
+·░▒▓█
+0→peak 8/day (requested)
+□ today; Sun→Sat rows
+180 commits requested · streak: 3 days
 
    ██████████
    ██████████
@@ -18,8 +23,9 @@ ACTIVITY GRAPH  ·  last 10 weeks · week
    ██████████
    ██████████
    ██████████
+scale: 0..18 commits/bar; week buckets; chart: 2024-04-07..Jun 15
 
-  counts
+counts (calendar buckets; edges may be partial)
     2024-04-08..2024-04-14 18
     2024-04-15..2024-04-21 18
     2024-04-22..2024-04-28 18

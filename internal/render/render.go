@@ -36,16 +36,19 @@ type Model struct {
 	Recent       []gitdata.RecentCommit
 	// PRs are the open pull requests on the forge hosting this repo; empty when
 	// there is no forge, no forge CLI, or nothing open — the panel is dropped.
-	PRs   []forge.PR
-	Now   time.Time
-	Width int
-	// Layout selects the dashboard shape: LayoutAuto (default), LayoutWide, or
-	// LayoutStack. The empty string means auto.
+	PRs       []forge.PR
+	Now       time.Time
+	Width     int
+	Height    int  // terminal rows; 0 disables automatic height constraints
+	Shallow   bool // only locally available history is represented
+	DateBasis aggregate.DateBasis
+	// Layout selects auto, wide, stack or compact. The empty string means auto.
 	Layout string
 }
 
 // GraphModel is the focused activity drill-down view. Width: see Model.
 type GraphModel struct {
+	DateBasis    aggregate.DateBasis
 	RangeLabel   string
 	Bucket       string
 	Days         []aggregate.DayCount
@@ -112,9 +115,10 @@ func (p palette) c(code, s string) string {
 
 // Layout modes for the dashboard, selected by Model.Layout.
 const (
-	LayoutAuto  = "auto"  // two columns when the terminal is wide enough
-	LayoutWide  = "wide"  // always two columns
-	LayoutStack = "stack" // always one column
+	LayoutAuto    = "auto"    // two columns when the terminal is wide enough
+	LayoutWide    = "wide"    // always two columns
+	LayoutStack   = "stack"   // always one column
+	LayoutCompact = "compact" // prioritize current state in short terminals
 )
 
 // minGridWidth is the narrowest terminal that gets the two-column grid. Below
@@ -128,7 +132,7 @@ const gridGutter = 1
 // ValidLayout reports whether mode is a layout Dashboard understands.
 func ValidLayout(mode string) bool {
 	switch mode {
-	case LayoutAuto, LayoutWide, LayoutStack, "":
+	case LayoutAuto, LayoutWide, LayoutStack, LayoutCompact, "":
 		return true
 	default:
 		return false
@@ -162,10 +166,19 @@ func useGrid(m Model) bool {
 }
 
 func (p palette) dashboard(m Model) []string {
-	if useGrid(m) {
-		return p.dashboardGrid(m)
+	if m.Layout == LayoutCompact {
+		return p.dashboardCompact(m)
 	}
-	return p.dashboardStack(m)
+	var lines []string
+	if useGrid(m) {
+		lines = p.dashboardGrid(m)
+	} else {
+		lines = p.dashboardStack(m)
+	}
+	if (m.Layout == "" || m.Layout == LayoutAuto) && m.Height > 0 && len(lines)+2 > m.Height {
+		return p.dashboardCompact(m)
+	}
+	return lines
 }
 
 // dashboardGrid lays the panels out in two columns, flowing top-to-bottom
@@ -213,7 +226,7 @@ func (p palette) dashboardGrid(m Model) []string {
 
 	right := stackBoxes(
 		p.box(titleWith("Top contributors", ""), contributors, rightW-2),
-		p.box(titleWith("Codebase growth", "6mo"), growth, rightW-2),
+		p.box(titleWith("Net-line history", "6mo"), growth, rightW-2),
 	)
 
 	out := p.box(titleWith("Repo", ""), vitals, fullW)
@@ -262,7 +275,7 @@ func (p palette) dashboardStack(m Model) []string {
 	}
 	boxes = append(boxes,
 		p.box(titleWith("Top contributors", ""), contributors, innerW),
-		p.box(titleWith("Codebase growth", "6mo"), growth, innerW),
+		p.box(titleWith("Net-line history", "6mo"), growth, innerW),
 	)
 	if len(hot) > 0 {
 		boxes = append(boxes, p.box(titleWith("Hot files", ""), hot, innerW))
@@ -304,7 +317,7 @@ func (p palette) contributorLines(m Model, width int) []string {
 }
 
 func (p palette) growthLines(m Model, width int) []string {
-	return capture(func(w io.Writer) { p.growth(w, m.Growth) })
+	return p.growthContext(m, width)
 }
 
 func (p palette) hotFileLines(m Model, width int) []string {
@@ -342,19 +355,42 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 	p := palette{on: color}
 
 	fmt.Fprintln(w)
-	p.header(w, "Activity graph", m.RangeLabel+" · "+m.Bucket)
+	for _, line := range p.textLines(titleWith("Activity graph", m.RangeLabel+" · "+m.Bucket), m.Width) {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w)
-	p.heatmap(w, Model{Days: m.Days, TotalCommits: m.TotalCommits, Streak: m.Streak, Now: m.Now, Width: m.Width})
+	p.heatmap(w, Model{Days: m.Days, TotalCommits: m.TotalCommits, Streak: m.Streak, Now: m.Now, Width: m.Width, DateBasis: m.DateBasis})
 
-	if chart := p.activityChart(m.Buckets, activityChartHeight); len(chart) > 0 {
+	columns := 0
+	if m.Width > 0 {
+		columns = max(1, m.Width-2)
+	}
+	bars := displayBuckets(m.Buckets, columns)
+	if chart := p.activityChart(bars, activityChartHeight); len(chart) > 0 {
 		fmt.Fprintln(w)
 		for _, line := range chart {
 			fmt.Fprintln(w, "  "+line)
 		}
+		peak := 0
+		for _, b := range bars {
+			peak = max(peak, b.Count)
+		}
+		label := fmt.Sprintf("scale: 0..%d commits/bar; %s buckets", peak, m.Bucket)
+		if len(bars) < len(m.Buckets) {
+			label += fmt.Sprintf(" summed into %d display bars", len(bars))
+		}
+		if len(m.Days) > 0 {
+			label += "; chart: " + dateInterval(m.Days[0].Date, m.Days[len(m.Days)-1].Date)
+		}
+		for _, line := range p.textLines(label, m.Width) {
+			fmt.Fprintln(w, line)
+		}
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+p.c(cLabel, "counts"))
+	for _, line := range p.textLines("counts (calendar buckets; edges may be partial)", m.Width) {
+		fmt.Fprintln(w, line)
+	}
 	// Empty buckets are dropped and the rest are packed across the terminal:
 	// a day-bucketed quarter is ~90 rows, nearly all of them zeros the heatmap
 	// and the chart above have already shown.
@@ -364,7 +400,7 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 		if b.Count == 0 {
 			continue
 		}
-		cell := p.c(cLabel, periodLabel(b, m.Bucket)) + " " + strconv.Itoa(b.Count)
+		cell := periodLabel(b, m.Bucket) + " " + strconv.Itoa(b.Count)
 		if n := visibleLen(cell); n > cellW {
 			cellW = n
 		}
@@ -385,7 +421,9 @@ func Graph(w io.Writer, m GraphModel, color bool) {
 		lines = packParts(cells, m.Width-4, 3)
 	}
 	for _, line := range lines {
-		fmt.Fprintln(w, "    "+strings.TrimRight(line, " "))
+		for _, wrapped := range p.textLines(strings.TrimRight(line, " "), max(0, m.Width-4)) {
+			fmt.Fprintln(w, "    "+wrapped)
+		}
 	}
 	fmt.Fprintln(w)
 }
@@ -791,6 +829,28 @@ func (p palette) heatmap(w io.Writer, m Model) {
 			startCol = cols - maxCols
 		}
 	}
+	if len(m.Days) > 0 {
+		start, end := m.Days[0].Date, m.Days[len(m.Days)-1].Date
+		for _, line := range p.textLines("requested: "+dateInterval(start, end), m.Width) {
+			fmt.Fprintln(w, line)
+		}
+		for _, line := range p.textLines(historyScope(m.DateBasis), m.Width) {
+			fmt.Fprintln(w, line)
+		}
+		if startCol > 0 {
+			visible := start.AddDate(0, 0, -int(start.Weekday())+startCol*7)
+			count := 0
+			for _, d := range m.Days {
+				if !d.Date.Before(visible) {
+					count += d.Count
+				}
+			}
+			label := fmt.Sprintf("visible: %s; %d commits; %d older weeks omitted", dateInterval(visible, end), count, startCol)
+			for _, line := range p.textLines(label, m.Width) {
+				fmt.Fprintln(w, line)
+			}
+		}
+	}
 	for r := 0; r < 7; r++ {
 		var b strings.Builder
 		b.WriteString("  ")
@@ -800,10 +860,23 @@ func (p palette) heatmap(w io.Writer, m Model) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
-	summary := fmt.Sprintf("%d %s in range · streak: %d %s",
+	legend := ""
+	for i, glyph := range heatGlyphs {
+		if p.on {
+			glyph = cellFilled
+		}
+		legend += p.c(heatColors[i], glyph)
+	}
+	fmt.Fprintln(w, legend)
+	for _, line := range p.textLines(fmt.Sprintf("0→peak %d/day (requested)\n□ today; Sun→Sat rows", max), m.Width) {
+		fmt.Fprintln(w, line)
+	}
+	summary := fmt.Sprintf("%d %s requested · streak: %d %s",
 		m.TotalCommits, plural(m.TotalCommits, "commit", "commits"),
 		m.Streak, plural(m.Streak, "day", "days"))
-	fmt.Fprintln(w, "  "+p.c(cLabel, summary))
+	for _, line := range p.textLines(summary, m.Width) {
+		fmt.Fprintln(w, line)
+	}
 }
 
 func (p palette) cellGlyph(c cell, max int) string {
@@ -1047,27 +1120,6 @@ func maxNameWidth(width, countW int) int {
 		return avail
 	}
 	return base
-}
-
-func (p palette) growth(w io.Writer, g aggregate.Growth) {
-	var pct string
-	switch {
-	case !g.HasPct:
-		pct = p.c(cLabel, "·")
-	case g.Pct >= 0.5:
-		pct = p.c(cAccent, fmt.Sprintf("▲ %.0f%%", g.Pct))
-	case g.Pct <= -0.5:
-		pct = p.c(cRed, fmt.Sprintf("▼ %.0f%%", -g.Pct))
-	default:
-		pct = p.c(cLabel, "≈ 0%") // 6mo baseline exists but essentially flat
-	}
-	fmt.Fprintf(w, "  %s LOC  %s\n", p.c(cBright, humanInt(g.TotalLOC)), pct)
-
-	if chart := p.growthChart(g.Spark, growthChartHeight); len(chart) > 0 {
-		for _, line := range chart {
-			fmt.Fprintln(w, "  "+line)
-		}
-	}
 }
 
 // hotFiles lists the files with the most commits against them. Counts lead so

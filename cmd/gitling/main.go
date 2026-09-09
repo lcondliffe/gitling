@@ -72,13 +72,13 @@ func main() {
 
 	noColor := flag.Bool("no-color", false, "disable ANSI color output (alias for --color=never)")
 	color := flag.String("color", "auto", "when to use color: always, never, auto (default auto)")
-	since := flag.String("since", "", "time range for all sections: e.g. 30d, 12w, 6mo, 1y (default 14w)")
+	since := flag.String("since", "", "activity, contributor and churn range: e.g. 30d, 12w, 6mo, 1y (default 14w)")
 	graph := flag.Bool("graph", false, "show the full activity graph drill-down")
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
 	recent := flag.Int("recent", defaultRecent, "number of recent commits to list on the dashboard (0 hides the panel)")
-	layout := flag.String("layout", "auto", "dashboard layout: auto, wide, stack")
+	layout := flag.String("layout", "auto", "dashboard layout: auto, wide, stack, compact")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
@@ -162,7 +162,7 @@ func main() {
 		os.Exit(2)
 	}
 	if !render.ValidLayout(*layout) {
-		fmt.Fprintf(os.Stderr, "gitling: invalid --layout %q (use auto, wide, or stack)\n", *layout)
+		fmt.Fprintf(os.Stderr, "gitling: invalid --layout %q (use auto, wide, stack, or compact)\n", *layout)
 		os.Exit(2)
 	}
 	if err := validateBucket(*bucket); err != nil {
@@ -187,6 +187,7 @@ func main() {
 	if !ok {
 		width = 0 // unknown/unbounded; renderers keep today's fixed-width behavior
 	}
+	height, _ := render.TerminalHeight(os.Stdout)
 
 	if err := run(os.Stdout, options{
 		since:     *since,
@@ -198,6 +199,7 @@ func main() {
 		recent:    *recent,
 		layout:    *layout,
 		width:     width,
+		height:    height,
 		prs:       *prs,
 		fetch:     *fetchFlag,
 	}); err != nil {
@@ -218,13 +220,15 @@ Usage:
   gitling tidy [flags]
 
 Flags:
-  --since <dur>    time range for all sections: 30d, 12w, 6mo, 1y (default 14w)
+  --since <dur>    activity, contributor and churn range (default 14w)
+                    accepts 30d, 12w, 6mo, 1y; growth always uses 6mo;
+                    recent commits, PRs and live state are unfiltered
   --graph          show the full activity graph drill-down
   --churn          show the full file churn drill-down
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
   --recent <n>     recent commits listed on the dashboard, 0 hides them (default 5)
-  --layout <mode>  dashboard layout: auto, wide, stack (default auto)
+  --layout <mode>  dashboard layout: auto, wide, stack, compact (default auto)
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON instead of the human dashboard
@@ -263,6 +267,7 @@ type options struct {
 	recent    int
 	layout    string
 	width     int  // terminal columns; 0 when unknown (piped or redirected)
+	height    int  // terminal rows; 0 when unknown (piped or redirected)
 	prs       bool // list open pull requests on the dashboard
 	fetch     bool // multi-repo overview: fetch each repo before probing it
 }
@@ -370,6 +375,9 @@ func run(stdout io.Writer, o options) error {
 		Now:        now,
 		Width:      o.width,
 		Layout:     o.layout,
+		Height:     o.height,
+		Shallow:    repo.IsShallow(),
+		DateBasis:  o.dateBasis,
 	}
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)
@@ -377,6 +385,7 @@ func run(stdout io.Writer, o options) error {
 	buckets := aggregate.BucketCounts(m.Days, o.bucket)
 	if o.view == "graph" {
 		render.Graph(stdout, render.GraphModel{
+			DateBasis:    o.dateBasis,
 			RangeLabel:   m.RangeLabel,
 			Bucket:       o.bucket,
 			Days:         m.Days,

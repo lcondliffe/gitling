@@ -12,6 +12,34 @@ Six panels on one screen. They lay out in two columns on a terminal at least
 100 columns wide and stack into one below that; `--layout wide|stack` forces
 either shape.
 
+`--layout compact` (or `"layout": "compact"` in config) prioritizes current
+state in short terminals and tmux panes. Auto switches to compact when the full
+dashboard exceeds the detected height; explicit `wide` and `stack` always keep
+their full layouts.
+
+Compact targets at most 24 rows, or the terminal height if smaller, including
+the surrounding blank lines. Panels use the full width:
+
+- Repo state is mandatory: its minimum is two borders plus **all** wrapped
+  state lines, including conflicts, interrupted operations, staged/modified
+  work, upstream divergence, stash and branch-health warnings. Long branch
+  names wrap rather than displacing warnings.
+- Optional panels are admitted in order: open PRs, activity summary, recent
+  commits, contributors, net-line history, hot files. Each needs two borders
+  plus its complete body; the activity chart becomes an explicitly labelled
+  summary. Once a panel cannot fit, it and the lower-priority panels are named
+  in an `omitted:` footer. Existing title/path ellipses still mark width cuts.
+- If even state plus the omission footer cannot fit, output deliberately
+  exceeds the height and says so. Scroll rather than lose a blocker. Use
+  `--layout stack` for full details; this is still one-shot output, not a TUI.
+
+Rows are detected with an ioctl on Linux/macOS/BSD or the visible console
+window on Windows. A positive `LINES` overrides rows **only on a real
+terminal**. Unknown rows disable automatic compaction; pipes never inherit a
+height limit. Explicit compact has a stable 24-row target and an 80-column
+fallback when width is unknown. The existing `COLUMNS` width override remains
+available, including in pipes. JSON is unaffected by layout or dimensions.
+
 ## Install
 
 ```sh
@@ -32,7 +60,7 @@ sure it's on your `PATH`. Prebuilt binaries are on the
 
 ```sh
 gitling                  # default dashboard (last 14 weeks)
-gitling --since 30d      # override the range for all sections (d, w, mo, y)
+gitling --since 30d      # activity, contributors and churn window (d, w, mo, y)
 gitling graph --since 1y # focused activity drill-down
 gitling churn --since 1y # file churn: all files, ranked by commit count
 gitling contributors     # all authors, ranked (--since sets the window)
@@ -41,6 +69,7 @@ gitling tidy             # dry run: local branches that are safe to delete
 gitling tidy --apply     # actually delete them (prompts once)
 gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --layout stack   # force one column; --layout wide forces two
+gitling --layout compact # prioritize current state in short panes
 gitling --prs=false      # skip the open pull requests panel
 gitling --json           # structured dashboard data for scripts/integrations
 gitling --date commit    # bucket by commit date instead of author date
@@ -52,6 +81,40 @@ gitling --fetch          # ...fetching each repo first for fresh ahead/behind
 
 Each drill-down is available as a subcommand or the matching `--flag`; naming
 two different views is an error.
+
+### Dates, scales and history scope
+
+`--since` selects inclusive local calendar days for activity, contributors and
+file churn, from today minus the duration through today. `mo` means 30 days and
+`y` means 365 days here. These metrics cover non-merge commits reachable from
+HEAD, using author dates by default (`--date commit` selects committer dates).
+They do not count every branch. Recent commits ignore `--since`, include merges
+and use committer dates. Repo/branch state, open PRs, the multi-repo overview
+and `tidy` are live-state views, not filtered history.
+
+The heatmap prints the requested date interval, with year context, and a
+compact intensity ramp (zero through the requested interval's daily peak;
+nonzero levels are quartiles of that peak, not percentiles). `□` marks today;
+rows run Sunday through Saturday. Narrow displays retain the newest weeks and
+explicitly report the visible interval/count separately from requested totals
+and streak, with an older-weeks omission marker. Long graph series sum adjacent
+day/week/month buckets into width-bounded display bars; the scale is commits
+per **display bar**, and the whole requested interval is retained. The counts
+below remain the original nonzero calendar buckets; first/last buckets may be
+partial because the requested window cuts through them.
+
+Net-line history is **approximate historical net-line change**, not a count of
+lines currently in the checkout. It cumulatively sums insertions minus deletions
+from available HEAD non-merge history (negative cumulative samples clamp to
+zero). Binary changes and merge-resolution changes are not represented; copied,
+reverted or parallel changes can make this diverge from current LOC. Its chart
+always samples the last **six calendar months**, independently of `--since`,
+using `--date`'s basis. The chart labels its date window and min/max scale;
+percentage compares the cumulative total with the six-month baseline, when
+available. Narrow growth charts retain bucket endpoints, not sums of cumulative
+samples. Shallow clones get an explicit incomplete-history caveat. The existing
+JSON `growth.total_loc` field retains its compatibility name and the same
+approximate semantics.
 
 ## Open PRs
 
