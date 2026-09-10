@@ -651,7 +651,7 @@ func TestDashboardHidesEmptyOptionalPanels(t *testing.T) {
 			t.Errorf("width %d: open PRs box should be omitted when empty:\n%s", width, out)
 		}
 		// The mandatory panels are still there.
-		for _, want := range []string{"REPO", "ACTIVITY", "TOP CONTRIBUTORS", "CODEBASE GROWTH"} {
+		for _, want := range []string{"REPO", "ACTIVITY", "TOP CONTRIBUTORS", "NET-LINE HISTORY"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("width %d: missing %s box:\n%s", width, want, out)
 			}
@@ -940,10 +940,12 @@ func TestHeatmapCapsColumnsAndKeepsMostRecent(t *testing.T) {
 
 	out := buf.String()
 	lines := strings.Split(out, "\n")
+	todayVisible := false
 	for i, l := range lines {
-		if i >= 7 { // only the 7 grid rows are column-bounded
-			break
-		}
+		if !strings.HasPrefix(l, "  ") {
+			continue
+		} // only grid rows are indented
+		todayVisible = todayVisible || strings.Contains(l, "□")
 		gotCols := (cellLen(l) + 1) / 2 // indent already stripped by TrimRight on empties
 		if gotCols > maxCols+1 {        // +1 slack: indent isn't a full column
 			t.Fatalf("heatmap row %d has %d cells, exceeds cap of %d columns:\n%s", i, cellLen(l), maxCols, out)
@@ -952,7 +954,7 @@ func TestHeatmapCapsColumnsAndKeepsMostRecent(t *testing.T) {
 	// Today's glyph ('□' when off, since it's always drawn regardless of
 	// count) must still be present: the most recent column is kept, not
 	// dropped, when the range doesn't fit.
-	if !strings.Contains(out, "□") {
+	if !todayVisible {
 		t.Fatalf("narrow-width heatmap dropped today's column:\n%s", out)
 	}
 }

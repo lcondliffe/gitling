@@ -165,6 +165,12 @@ func (r *Repo) run(args ...string) (string, error) {
 	return r.runContext(context.Background(), args...)
 }
 
+// IsShallow is a cheap live probe; growth can only describe available history.
+func (r *Repo) IsShallow() bool {
+	out, err := r.run("rev-parse", "--is-shallow-repository")
+	return err == nil && strings.TrimSpace(out) == "true"
+}
+
 // runContext runs git under ctx with interactive prompts disabled: gitling is
 // a reporting tool, so a credential prompt would hang it with no way to answer.
 func (r *Repo) runContext(ctx context.Context, args ...string) (string, error) {

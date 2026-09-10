@@ -17,8 +17,8 @@ const DefaultWidth = 80
 // variable if it is set to a positive integer (the POSIX convention, and
 // what lets tests and scripts override detection), otherwise a
 // platform-specific ioctl query. ok is false when neither source yields a
-// usable width — piped/redirected output, or a platform without an ioctl
-// implementation (e.g. Windows) and no COLUMNS set. Callers should treat
+// usable width — piped/redirected output, or an unsupported platform and no
+// COLUMNS set. Windows uses the visible console window. Callers should treat
 // !ok as "unknown", not substitute DefaultWidth, since 0 already means
 // "unbounded" to the renderers in this package.
 func TerminalWidth(f *os.File) (int, bool) {
@@ -28,4 +28,17 @@ func TerminalWidth(f *os.File) (int, bool) {
 		}
 	}
 	return ioctlWinsize(f)
+}
+
+// TerminalHeight queries a real terminal before considering LINES, so inherited
+// shell dimensions cannot collapse redirected output. Unknown height is unbounded.
+func TerminalHeight(f *os.File) (int, bool) {
+	rows, _, ok := terminalSize(f)
+	if !ok {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(os.Getenv("LINES")); err == nil && n > 0 {
+		return n, true
+	}
+	return rows, rows > 0
 }
