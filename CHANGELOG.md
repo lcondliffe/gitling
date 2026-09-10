@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/lcondliffe/gitling/compare/v0.6.1...v0.6.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* adapt dashboard height and clarify activity chart scope ([#50](https://github.com/lcondliffe/gitling/issues/50)) ([5058ca4](https://github.com/lcondliffe/gitling/commit/5058ca4a8143429c1581ead961f34d1ee6b6dfd2))
+
 ## [0.6.1](https://github.com/lcondliffe/gitling/compare/v0.6.0...v0.6.1) (2026-08-20)
 
 
