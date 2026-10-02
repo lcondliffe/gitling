@@ -58,7 +58,7 @@ func TestRangeLabel(t *testing.T) {
 }
 
 func TestSubcommandView(t *testing.T) {
-	views := map[string]string{"graph": "graph", "churn": "churn", "contributors": "contributors", "branches": "branches"}
+	views := map[string]string{"graph": "graph", "churn": "churn", "contributors": "contributors", "branches": "branches", "compare": "compare"}
 	for name, want := range views {
 		got, ok := subcommandView(name)
 		if !ok || got != want {
