@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -217,9 +218,10 @@ func (r *Repo) IsAncestor(maybeAncestor, descendant string) bool {
 	return err == nil
 }
 
-// Status gathers the current branch / tracking / working-tree state: the
-// cheap subset of Vitals (three git processes) that the multi-repo overview
-// probes once per repo. Every query degrades on its own — a repo with no
+// Status gathers the current branch / tracking / working-tree state plus any
+// in-progress operation and the last fetch time: the cheap subset of Vitals
+// (a handful of git processes) that the multi-repo overview probes once per
+// checkout. Every query degrades on its own — a repo with no
 // upstream or no commits simply leaves those fields zero.
 func (r *Repo) Status() Vitals {
 	var v Vitals
@@ -248,24 +250,23 @@ func (r *Repo) Status() Vitals {
 		v.DirtyFiles = countLines(out)
 		v.Staged, v.Modified, v.Untracked, v.Conflicts = parseStatusCounts(out)
 	}
+	if dir, err := r.GitDir(); err == nil {
+		v.Operation = detectOperation(dir)
+	}
+	if dir, err := r.CommonDir(); err == nil {
+		v.LastFetch = lastFetch(dir)
+	}
 	return v
 }
 
-// Vitals gathers the full repo state for the dashboard: Status plus stashes,
-// in-progress operations, fetch age, and branch health.
+// Vitals gathers the full repo state for the dashboard: Status plus stashes
+// and branch health.
 func (r *Repo) Vitals() Vitals {
 	v := r.Status()
 	// %ct on the stash entries' commits: the stash stack is newest-first, so the
 	// last line is the oldest entry.
 	if out, err := r.run("stash", "list", "--format=%ct"); err == nil {
 		v.StashCount, v.OldestStash = parseStashList(out)
-	}
-
-	if dir, err := r.GitDir(); err == nil {
-		v.Operation = detectOperation(dir)
-	}
-	if dir, err := r.commonDir(); err == nil {
-		v.LastFetch = lastFetch(dir)
 	}
 
 	v.StaleAfterDays = StaleBranchDays
@@ -290,11 +291,11 @@ func (r *Repo) Vitals() Vitals {
 	return v
 }
 
-// commonDir returns the absolute path to the repository's common git dir. In a
+// CommonDir returns the absolute path to the repository's common git dir. In a
 // linked worktree this differs from GitDir: per-worktree state (HEAD, an
 // in-progress rebase) lives in the git dir, while shared state (refs, objects,
 // FETCH_HEAD) lives in the common dir.
-func (r *Repo) commonDir() (string, error) {
+func (r *Repo) CommonDir() (string, error) {
 	out, err := r.run("rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
@@ -305,7 +306,30 @@ func (r *Repo) commonDir() (string, error) {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(r.dir, dir)
 	}
-	return dir, nil
+	return filepath.Abs(dir)
+}
+
+// Worktrees returns the absolute path of every non-bare checkout of the repo.
+func (r *Repo) Worktrees() ([]string, error) {
+	out, err := r.run("worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktrees(out), nil
+}
+
+// parseWorktrees reads `git worktree list --porcelain` records.
+func parseWorktrees(out string) []string {
+	var paths []string
+	for rec := range strings.SplitSeq(strings.TrimSpace(out), "\n\n") {
+		lines := strings.Split(rec, "\n")
+		path, ok := strings.CutPrefix(lines[0], "worktree ")
+		if !ok || slices.Contains(lines[1:], "bare") {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 // parseStatusCounts classifies `git status --porcelain` entries by their XY
