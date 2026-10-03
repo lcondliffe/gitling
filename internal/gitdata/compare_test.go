@@ -1,6 +1,7 @@
 package gitdata
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -138,5 +139,34 @@ func TestCompareShallow(t *testing.T) {
 	// Both tips are present but the history joining them was cut off.
 	if _, err := r.Compare("origin/old", 5); err == nil || !strings.Contains(err.Error(), "shallow") {
 		t.Errorf("shallow: %v", err)
+	}
+}
+
+// diff.relative would otherwise hide changes outside the directory gitling runs in.
+func TestCompareFromSubdirIgnoresDiffRelative(t *testing.T) {
+	f := newFixture(t)
+	gitCmd(t, f.local, "checkout", "-q", "-b", "feature")
+	if err := os.Mkdir(filepath.Join(f.local, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, f.local, "outside.txt", "x\n", "outside", time.Time{})
+	commitFile(t, f.local, "sub/in.txt", "y\n", "inside", time.Time{})
+	gitCmd(t, f.local, "config", "diff.relative", "true")
+
+	r, err := Open(filepath.Join(f.local, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Compare("main", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Files) != 2 || c.Insertions != 2 {
+		t.Fatalf("files %+v, +%d; want outside.txt and sub/in.txt, +2", c.Files, c.Insertions)
+	}
+	for _, fc := range c.Files {
+		if fc.Path != "outside.txt" && fc.Path != "sub/in.txt" {
+			t.Errorf("unexpected path %q", fc.Path)
+		}
 	}
 }

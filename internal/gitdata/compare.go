@@ -78,9 +78,9 @@ func (r *Repo) Compare(base string, limit int) (Comparison, error) {
 	}
 
 	// -z keeps unusual paths verbatim; external diff drivers and textconv are
-	// off so numstat counts the stored bytes. Renames are requested explicitly
-	// so the result doesn't depend on diff.renames.
-	out, err = r.run("diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--find-renames", c.MergeBase, c.HeadOID, "--")
+	// off so numstat counts the stored bytes. Renames and repo-relative paths
+	// are explicit so diff.renames and diff.relative can't change the result.
+	out, err = r.run("diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--no-relative", "--find-renames", c.MergeBase, c.HeadOID, "--")
 	if err != nil {
 		return c, err
 	}
