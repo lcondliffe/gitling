@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -284,4 +285,36 @@ func TestGoldenBranches(t *testing.T) {
 	var buf bytes.Buffer
 	Branches(&buf, goldenBranchesModel(), false)
 	checkGolden(t, "branches.golden.txt", buf.Bytes())
+}
+
+func goldenCompareModel() CompareModel {
+	c := gitdata.Comparison{
+		Base:        "origin/main",
+		BaseOID:     "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		HeadOID:     "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		MergeBase:   "3333333ccccccccccccccccccccccccccccccccc",
+		CommitCount: 12,
+		Commits: []gitdata.RecentCommit{
+			{Short: "2222222", Subject: "feat: compare view", Author: "Ada Lovelace", Time: goldenNow.Add(-2 * time.Hour)},
+			{Short: "4444444", Subject: "test: odd filenames", Author: "Alan Turing", Time: goldenNow.Add(-26 * time.Hour)},
+		},
+		Files: []gitdata.FileChange{
+			{Path: "internal/gitdata/compare.go", Insertions: 120, Deletions: 4},
+			{Path: "docs/new.md", OldPath: "docs/old.md", Insertions: 3, Deletions: 1},
+			{Path: "line\nbreak.txt", Insertions: 1},
+			{Path: "logo.png", Binary: true},
+		},
+		Insertions: 124,
+		Deletions:  5,
+	}
+	for i := range compareFiles {
+		c.Files = append(c.Files, gitdata.FileChange{Path: fmt.Sprintf("gen/file%02d.go", i), Deletions: 1})
+	}
+	return CompareModel{Head: "feature/compare", Compare: c, Shallow: true, Now: goldenNow}
+}
+
+func TestGoldenCompare(t *testing.T) {
+	var buf bytes.Buffer
+	Compare(&buf, goldenCompareModel(), false)
+	checkGolden(t, "compare.golden.txt", buf.Bytes())
 }

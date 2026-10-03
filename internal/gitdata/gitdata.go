@@ -692,13 +692,18 @@ func parseLog(out string) []Commit {
 // Merges are included (see RecentCommit). A limit <= 0 returns nothing without
 // touching git.
 func (r *Repo) RecentCommits(limit int) ([]RecentCommit, error) {
+	return r.recentLog(limit)
+}
+
+// recentLog is RecentCommits over an optional revision range.
+func (r *Repo) recentLog(limit int, revs ...string) ([]RecentCommit, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 	// %aN is mailmap-resolved, matching Commits. %P (parents) identifies merges;
 	// %b is last because it is the only field that may contain newlines.
 	format := "%x1e%H%x1f%h%x1f%aN%x1f%ct%x1f%P%x1f%s%x1f%b"
-	out, err := r.run("log", "-n", strconv.Itoa(limit), "--pretty=format:"+format)
+	out, err := r.run(append([]string{"log", "-n", strconv.Itoa(limit), "--pretty=format:" + format}, revs...)...)
 	if err != nil {
 		return nil, err
 	}

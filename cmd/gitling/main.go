@@ -30,6 +30,10 @@ const defaultRecent = 5
 // waiting on me" glance, not a queue.
 const maxPRs = 5
 
+// maxCompareCommits caps the commits the compare view lists; the count above
+// them covers the rest.
+const maxCompareCommits = 10
+
 // version is overwritten at build time via -ldflags "-X main.version=..." in
 // the release workflow. For `go install module@vX.Y.Z` builds (no ldflags), it
 // falls back to the version Go stamps into the build info.
@@ -76,6 +80,7 @@ func main() {
 	churn := flag.Bool("churn", false, "show the full file churn drill-down")
 	contributors := flag.Bool("contributors", false, "show the full contributor drill-down")
 	branches := flag.Bool("branches", false, "show the branch overview drill-down")
+	base := flag.String("base", "", "compare view: revision to compare HEAD against (default: the default branch)")
 	recent := flag.Int("recent", defaultRecent, "number of recent commits to list on the dashboard (0 hides the panel)")
 	layout := flag.String("layout", "auto", "dashboard layout: auto, wide, stack, compact")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
@@ -159,6 +164,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	if explicit["base"] && view != "compare" {
+		fmt.Fprintln(os.Stderr, "gitling: --base only applies to the compare view")
+		os.Exit(2)
+	}
 	if *recent < 0 {
 		fmt.Fprintf(os.Stderr, "gitling: invalid --recent %d (must be 0 or more)\n", *recent)
 		os.Exit(2)
@@ -215,6 +224,7 @@ func main() {
 		sort:      *sortFlag,
 		only:      *onlyFlag,
 		worktrees: *worktreesFlag,
+		base:      *base,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
@@ -230,6 +240,7 @@ Usage:
   gitling churn [flags]
   gitling contributors [flags]
   gitling branches [flags]
+  gitling compare [--base <rev>]
   gitling tidy [flags]
 
 Flags:
@@ -240,6 +251,8 @@ Flags:
   --churn          show the full file churn drill-down
   --contributors   show the full contributor drill-down
   --branches       show the branch overview drill-down
+  --base <rev>     compare view only: what HEAD is compared against
+                    (default: origin/HEAD, else local main or master)
   --recent <n>     recent commits listed on the dashboard, 0 hides them (default 5)
   --layout <mode>  dashboard layout: auto, wide, stack, compact (default auto)
   --bucket <b>     activity graph bucket: day, week, month (default day)
@@ -290,6 +303,7 @@ type options struct {
 	sort      string // multi-repo overview order: "name" or "attention"
 	only      string // multi-repo overview filter: "" or "attention"
 	worktrees bool   // multi-repo overview: include linked worktrees
+	base      string // compare view: base revision; empty means the default branch
 }
 
 func run(stdout io.Writer, o options) error {
@@ -341,6 +355,18 @@ func run(stdout io.Writer, o options) error {
 			return err
 		}
 		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: o.width}, o.color)
+		return nil
+	}
+	// Likewise live state, and deliberately kept out of the cached aggregate:
+	// it describes one comparison, not repository history.
+	if o.view == "compare" {
+		c, err := repo.Compare(o.base, maxCompareCommits)
+		if err != nil {
+			return err
+		}
+		render.Compare(stdout, render.CompareModel{
+			Head: vitals.Branch, Compare: c, Shallow: repo.IsShallow(), Now: now, Width: o.width,
+		}, o.color)
 		return nil
 	}
 
@@ -489,6 +515,8 @@ func subcommandView(name string) (string, bool) {
 		return "contributors", true
 	case "branches":
 		return "branches", true
+	case "compare":
+		return "compare", true
 	default:
 		return "", false
 	}

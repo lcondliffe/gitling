@@ -65,6 +65,8 @@ gitling graph --since 1y # focused activity drill-down
 gitling churn --since 1y # file churn: all files, ranked by commit count
 gitling contributors     # all authors, ranked (--since sets the window)
 gitling branches         # branch overview: ahead/behind, last commit, author
+gitling compare          # what this branch changes vs the default branch
+gitling compare --base v1.2.0   # ... or vs any revision
 gitling tidy             # dry run: local branches that are safe to delete
 gitling tidy --apply     # actually delete them (prompts once)
 gitling --recent 10      # list the last 10 commits (0 hides the panel)

@@ -1,0 +1,30 @@
+
+COMPARE  ·  feature/compare vs origin/main
+
+  base 1111111   head 2222222   merge base 3333333
+  commits origin/main..HEAD · diff origin/main...HEAD
+  shallow clone: only locally available history is compared
+
+COMMITS  ·  12 unique to HEAD
+  2222222  feat: compare view   Ada Lovelace  2h ago
+  4444444  test: odd filenames  Alan Turing   1d ago
+  … 10 more
+
+FILES  ·  19 changed  +124 -5
+  +120 -4   internal/gitdata/compare.go
+    +3 -1   docs/old.md → docs/new.md
+    +1 -0   "line\nbreak.txt"
+  binary    logo.png
+    +0 -1   gen/file00.go
+    +0 -1   gen/file01.go
+    +0 -1   gen/file02.go
+    +0 -1   gen/file03.go
+    +0 -1   gen/file04.go
+    +0 -1   gen/file05.go
+    +0 -1   gen/file06.go
+    +0 -1   gen/file07.go
+    +0 -1   gen/file08.go
+    +0 -1   gen/file09.go
+    +0 -1   gen/file10.go
+  … 4 more
+
