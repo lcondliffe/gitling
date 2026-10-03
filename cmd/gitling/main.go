@@ -4,7 +4,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -84,6 +83,9 @@ func main() {
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
 	prs := flag.Bool("prs", true, "show open pull requests (needs the forge CLI, e.g. gh)")
 	fetchFlag := flag.Bool("fetch", false, "multi-repo overview: fetch each repo first for accurate ahead/behind")
+	sortFlag := flag.String("sort", "name", "multi-repo overview order: name, attention")
+	onlyFlag := flag.String("only", "", "multi-repo overview filter: attention")
+	worktreesFlag := flag.Bool("worktrees", false, "multi-repo overview: include each repo's linked worktrees")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
 	flag.Usage = usage
@@ -182,6 +184,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	if *sortFlag != "name" && *sortFlag != "attention" {
+		fmt.Fprintf(os.Stderr, "gitling: invalid --sort %q (use name or attention)\n", *sortFlag)
+		os.Exit(2)
+	}
+	if *onlyFlag != "" && *onlyFlag != "attention" {
+		fmt.Fprintf(os.Stderr, "gitling: invalid --only %q (use attention)\n", *onlyFlag)
+		os.Exit(2)
+	}
 
 	width, ok := render.TerminalWidth(os.Stdout)
 	if !ok {
@@ -202,6 +212,9 @@ func main() {
 		height:    height,
 		prs:       *prs,
 		fetch:     *fetchFlag,
+		sort:      *sortFlag,
+		only:      *onlyFlag,
+		worktrees: *worktreesFlag,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
@@ -235,6 +248,10 @@ Flags:
   --prs=false      skip the open pull requests panel (needs a forge CLI: gh)
   --fetch          multi-repo overview only: fetch each repo first, for
                     accurate ahead/behind counts
+  --sort <order>   multi-repo overview order: name, attention (default name)
+  --only attention multi-repo overview: hide checkouts with nothing to act on
+  --worktrees      multi-repo overview: also list each repo's linked worktrees,
+                    wherever they live
   --color <mode>   when to use color: always, never, auto (default auto)
   --no-color       plain output with no ANSI escape codes (alias for --color=never)
   --config <path>  path to config file (default $XDG_CONFIG_HOME/gitling/config.json
@@ -266,10 +283,13 @@ type options struct {
 	json      bool
 	recent    int
 	layout    string
-	width     int  // terminal columns; 0 when unknown (piped or redirected)
-	height    int  // terminal rows; 0 when unknown (piped or redirected)
-	prs       bool // list open pull requests on the dashboard
-	fetch     bool // multi-repo overview: fetch each repo before probing it
+	width     int    // terminal columns; 0 when unknown (piped or redirected)
+	height    int    // terminal rows; 0 when unknown (piped or redirected)
+	prs       bool   // list open pull requests on the dashboard
+	fetch     bool   // multi-repo overview: fetch each repo before probing it
+	sort      string // multi-repo overview order: "name" or "attention"
+	only      string // multi-repo overview filter: "" or "attention"
+	worktrees bool   // multi-repo overview: include linked worktrees
 }
 
 func run(stdout io.Writer, o options) error {
@@ -291,8 +311,13 @@ func run(stdout io.Writer, o options) error {
 		}
 		return err
 	}
-	if o.fetch {
-		return errors.New("--fetch only applies to the multi-repo overview (run it in a directory of repositories)")
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{{"--fetch", o.fetch}, {"--sort", o.sort == "attention"}, {"--only", o.only != ""}, {"--worktrees", o.worktrees}} {
+		if f.set {
+			return fmt.Errorf("%s only applies to the multi-repo overview (run it in a directory of repositories)", f.name)
+		}
 	}
 	gitDir, err := repo.GitDir()
 	if err != nil {

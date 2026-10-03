@@ -91,3 +91,132 @@ printf '%s' '[{"number":7,"title":"t","author":{"login":"ada"},"isDraft":false,"
 		t.Errorf("run(fetch in repo): want --fetch error, got %v", err)
 	}
 }
+
+// TestRunReposAttention covers --sort/--only attention ordering and
+// --worktrees discovery and dedupe.
+func TestRunReposAttention(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH; skipping integration test")
+	}
+
+	parent, elsewhere := t.TempDir(), t.TempDir()
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		dir := filepath.Join(parent, name)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "init", "-q")
+		gitIn(t, dir, "config", "user.email", "test@example.com")
+		gitIn(t, dir, "config", "user.name", "Test")
+		gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
+	}
+	alpha := filepath.Join(parent, "alpha")
+	out := filepath.Join(elsewhere, "alpha-out")
+	gitIn(t, alpha, "worktree", "add", "-q", "-b", "out", out)
+	gitIn(t, alpha, "worktree", "add", "-q", "-b", "in", filepath.Join(parent, "alpha-in"))
+	write := func(path, body string) {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(out, "wip.txt"), "x")
+	write(filepath.Join(parent, "beta", "wip.txt"), "x")
+	write(filepath.Join(parent, "gamma", ".git", "BISECT_LOG"), "")
+	if err := os.Mkdir(filepath.Join(parent, "broken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(parent, "broken", ".git"), "garbage")
+	t.Chdir(parent)
+
+	opts := options{view: "dashboard", bucket: "day", dateBasis: aggregate.AuthorDate, layout: "auto",
+		sort: "attention", only: "attention", worktrees: true}
+	var buf bytes.Buffer
+	if err := run(&buf, opts); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "4 repos · 2 clean hidden") {
+		t.Errorf("want 4 shown, 2 hidden:\n%s", got)
+	}
+	if !strings.Contains(got, "bisect in progress") {
+		t.Errorf("operation marker missing:\n%s", got)
+	}
+	// The two dirty rows tie on rank; their name order depends on the temp dir.
+	g, o, b, x := strings.Index(got, "gamma"), strings.Index(got, "alpha-out"), strings.Index(got, "beta"), strings.Index(got, "broken")
+	if !(g < min(o, b) && max(o, b) < x) {
+		t.Fatalf("out of attention order:\n%s", got)
+	}
+
+	opts.only = ""
+	buf.Reset()
+	if err := run(&buf, opts); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := buf.String(); strings.Count(got, "alpha-in") != 1 || !strings.Contains(got, "6 repos") {
+		t.Errorf("alpha-in should be listed exactly once among 6:\n%s", got)
+	}
+}
+
+func initRepo(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "config", "user.email", "test@example.com")
+	gitIn(t, dir, "config", "user.name", "Test")
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
+}
+
+// TestRunReposNameOrder: children sharing a repo must not be grouped out of
+// name order.
+func TestRunReposNameOrder(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH; skipping integration test")
+	}
+	parent := t.TempDir()
+	initRepo(t, filepath.Join(parent, "alpha"))
+	initRepo(t, filepath.Join(parent, "beta"))
+	gitIn(t, filepath.Join(parent, "alpha"), "worktree", "add", "-q", "-b", "z", filepath.Join(parent, "zulu"))
+	t.Chdir(parent)
+
+	for _, sort := range []string{"name", "attention"} {
+		var buf bytes.Buffer
+		opts := options{view: "dashboard", bucket: "day", dateBasis: aggregate.AuthorDate, layout: "auto", sort: sort}
+		if err := run(&buf, opts); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		got := buf.String()
+		if a, b, z := strings.Index(got, "alpha"), strings.Index(got, "beta"), strings.Index(got, "zulu"); !(a < b && b < z) {
+			t.Errorf("--sort %s: want alpha, beta, zulu:\n%s", sort, got)
+		}
+	}
+}
+
+// TestRunReposWorktreeNewline: a newline in a worktree path must not split it.
+func TestRunReposWorktreeNewline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("newlines aren't valid in Windows paths")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH; skipping integration test")
+	}
+	parent := t.TempDir()
+	initRepo(t, filepath.Join(parent, "alpha"))
+	wt := filepath.Join(parent, "line\nbreak")
+	gitIn(t, filepath.Join(parent, "alpha"), "worktree", "add", "-q", "-b", "nl", wt)
+	if err := os.WriteFile(filepath.Join(wt, "wip.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(parent)
+
+	var buf bytes.Buffer
+	opts := options{view: "dashboard", bucket: "day", dateBasis: aggregate.AuthorDate, layout: "auto",
+		only: "attention", worktrees: true}
+	if err := run(&buf, opts); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, `"line\nbreak"`) || !strings.Contains(got, "1 dirty") || strings.Contains(got, "missing") {
+		t.Errorf("want the quoted newline worktree, dirty:\n%s", got)
+	}
+}

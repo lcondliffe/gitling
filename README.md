@@ -77,6 +77,7 @@ gitling --color=always   # always, never, or auto (default; honors NO_COLOR)
 gitling --config ~/gitling.json  # use an explicit config file
 gitling                  # in a directory of repos: one-line-per-repo overview
 gitling --fetch          # ...fetching each repo first for fresh ahead/behind
+gitling --sort attention --worktrees  # ...what needs you first, worktrees included
 ```
 
 Each drill-down is available as a subcommand or the matching `--flag`; naming
@@ -139,6 +140,17 @@ tracking refs — instant, but only as fresh as each repo's last fetch;
 `--fetch` fetches every repo first (failures fall back to local refs). PR
 counts follow the same rules as the dashboard panel and are skipped with
 `--prs=false`. Only immediate children are scanned, and nothing is written.
+Each row also shows an interrupted operation (rebase, merge, bisect, ...) and
+how long ago the repo last fetched.
+
+`--sort attention` puts the checkouts that need you first, in this order:
+conflicts, an interrupted operation, uncommitted changes, unpushed commits,
+then a failed `--fetch`, a fetch more than a week old, or a checkout that
+couldn't be read. Ties keep alphabetical order. `--only attention` hides the
+rest. `--worktrees` adds each repo's linked worktrees, wherever they live;
+a checkout found twice is listed once, and the fetch and PR lookup run once per
+repository. Checkouts that can't be read stay in the list with the reason, and
+the full error goes to stderr.
 
 ## Tidy
 

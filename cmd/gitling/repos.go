@@ -4,9 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
+	"unicode"
 
 	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
@@ -44,50 +50,204 @@ func childRepos(dir string) []string {
 	return names
 }
 
+// checkout is one working tree to probe; common is its repo's common git dir.
+type checkout struct {
+	path   string
+	common string
+	err    error
+}
+
 // runRepos renders the multi-repo overview: one line of Status (plus an open
-// PR count) per child repository. Read-only apart from the opt-in --fetch;
-// anything that fails per repo degrades to what the local refs already know.
+// PR count) per checkout. Read-only apart from --fetch; per-checkout failures
+// stay in the list and are warned about on stderr.
 func runRepos(stdout io.Writer, o options, names []string) error {
 	if o.json {
 		return errors.New("--json is not available for the multi-repo overview")
 	}
 
-	rows := make([]*render.RepoRow, len(names))
-	sem := make(chan struct{}, repoProbes)
-	var wg sync.WaitGroup
-	for i, name := range names {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			repo, err := gitdata.Open(name)
+	// Open each child repo and, with --worktrees, list its linked worktrees.
+	found := make([][]checkout, len(names))
+	bounded(len(names), func(i int) {
+		repo, err := gitdata.Open(names[i])
+		if err != nil {
+			found[i] = []checkout{{path: names[i], err: err}}
+			return
+		}
+		common, err := repo.CommonDir()
+		if err != nil {
+			found[i] = []checkout{{path: names[i], err: err}}
+			return
+		}
+		found[i] = []checkout{{path: names[i], common: common}}
+		if o.worktrees {
+			paths, err := repo.Worktrees()
 			if err != nil {
-				return // looked like a repo but isn't; skip the row
+				warn(names[i], err)
 			}
-			if o.fetch {
-				// Failure (offline, credentials) degrades to local refs.
-				_ = repo.Fetch(true)
+			for _, wt := range paths {
+				found[i] = append(found[i], checkout{path: wt, common: common})
 			}
-			row := &render.RepoRow{Name: name, Vitals: repo.Status()}
-			if o.prs {
-				row.PRs = len(forge.List(name, repo.RemoteURL(), overviewPRLimit))
-				row.MorePRs = row.PRs == overviewPRLimit
-			}
-			rows[i] = row
-		}()
-	}
-	wg.Wait()
+		}
+	})
 
-	m := render.ReposModel{Width: o.width}
-	for _, r := range rows {
-		if r != nil {
-			m.Rows = append(m.Rows, *r)
+	// Dedupe by real path, then group by repo so fetch and PR lookup run once.
+	seen := map[string]bool{}
+	var order []string
+	groups := map[string][]checkout{}
+	for _, cs := range found {
+		for _, c := range cs {
+			key := realPath(c.path)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			g := realPath(c.common)
+			if c.common == "" {
+				g = "\x00" + key // unopenable: a group of its own
+			}
+			if _, ok := groups[g]; !ok {
+				order = append(order, g)
+			}
+			groups[g] = append(groups[g], c)
 		}
 	}
-	if len(m.Rows) == 0 {
+
+	rows := make([][]render.RepoRow, len(order))
+	bounded(len(order), func(i int) { rows[i] = probeGroup(o, groups[order[i]]) })
+
+	now := time.Now()
+	m := render.ReposModel{Width: o.width, Now: now}
+	for _, rs := range rows {
+		for _, r := range rs {
+			if o.only == "attention" && render.Attention(r, now) == render.AttentionClean {
+				m.Hidden++
+				continue
+			}
+			m.Rows = append(m.Rows, r)
+		}
+	}
+	if len(m.Rows)+m.Hidden == 0 {
 		return fmt.Errorf("not a git repository (and no git repositories found in the current directory)")
 	}
+	// Rows come out grouped by repo; order by name, after rank for attention.
+	slices.SortStableFunc(m.Rows, func(a, b render.RepoRow) int {
+		if o.sort == "attention" {
+			if d := render.Attention(a, now) - render.Attention(b, now); d != 0 {
+				return d
+			}
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
 	render.Repos(stdout, m, o.color)
 	return nil
+}
+
+// probeGroup probes one repo's checkouts: one fetch and PR lookup, then each
+// checkout's own state.
+func probeGroup(o options, cs []checkout) []render.RepoRow {
+	rows := make([]render.RepoRow, len(cs))
+	fetched, fetchErr := false, error(nil)
+	prs, prsDone := 0, false
+	for i, c := range cs {
+		rows[i].Name = displayName(c.path)
+		if c.err != nil {
+			rows[i].Err = shortErr(c.err)
+			warn(c.path, c.err)
+			continue
+		}
+		repo, err := gitdata.Open(c.path)
+		if err != nil {
+			rows[i].Err = shortErr(err)
+			warn(c.path, err)
+			continue
+		}
+		if o.fetch && !fetched {
+			fetched = true
+			if fetchErr = repo.Fetch(true); fetchErr != nil {
+				warn(c.path, fetchErr)
+			}
+		}
+		rows[i].FetchFailed = fetchErr != nil
+		rows[i].Vitals = repo.Status()
+		if o.prs {
+			if !prsDone {
+				prsDone = true
+				prs = len(forge.List(c.path, repo.RemoteURL(), overviewPRLimit))
+			}
+			rows[i].PRs, rows[i].MorePRs = prs, prs == overviewPRLimit
+		}
+	}
+	return rows
+}
+
+// bounded runs f(0..n-1) concurrently, at most repoProbes at a time.
+func bounded(n int, f func(i int)) {
+	sem := make(chan struct{}, repoProbes)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			f(i)
+		})
+	}
+	wg.Wait()
+}
+
+// realPath canonicalizes a path for dedupe, falling back to the absolute path.
+func realPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
+}
+
+// displayName is the path relative to the cwd when inside it, else ~-relative.
+func displayName(path string) string {
+	return printable(relName(path))
+}
+
+// printable quotes s if it holds control characters, so a row stays one line.
+func printable(s string) string {
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
+func relName(path string) string {
+	if !filepath.IsAbs(path) {
+		return path
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(realPath(cwd), realPath(path)); err == nil && filepath.IsLocal(rel) {
+			return rel
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, path); err == nil && filepath.IsLocal(rel) {
+			return filepath.Join("~", rel)
+		}
+	}
+	return path
+}
+
+// shortErr trims a probe error to git's "fatal:" message when there is one.
+func shortErr(err error) string {
+	msg := err.Error()
+	if _, after, ok := strings.Cut(msg, "fatal: "); ok {
+		return printable(after)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return "missing"
+	}
+	return printable(msg)
+}
+
+func warn(path string, err error) {
+	fmt.Fprintf(os.Stderr, "gitling: warning: %s: %v\n", path, err)
 }
