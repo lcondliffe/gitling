@@ -141,13 +141,10 @@ func TestRunReposAttention(t *testing.T) {
 	if !strings.Contains(got, "bisect in progress") {
 		t.Errorf("operation marker missing:\n%s", got)
 	}
-	last := -1
-	for _, name := range []string{"gamma", "alpha-out", "beta", "broken"} {
-		i := strings.Index(got, name)
-		if i <= last {
-			t.Fatalf("%s out of attention order:\n%s", name, got)
-		}
-		last = i
+	// The two dirty rows tie on rank; their name order depends on the temp dir.
+	g, o, b, x := strings.Index(got, "gamma"), strings.Index(got, "alpha-out"), strings.Index(got, "beta"), strings.Index(got, "broken")
+	if !(g < min(o, b) && max(o, b) < x) {
+		t.Fatalf("out of attention order:\n%s", got)
 	}
 
 	opts.only = ""
