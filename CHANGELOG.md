@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/lcondliffe/gitling/compare/v0.6.2...v0.7.0) (2026-10-03)
+
+
+### Features
+
+* add compare view summarizing what a branch changes ([#53](https://github.com/lcondliffe/gitling/issues/53)) ([7fdbdb9](https://github.com/lcondliffe/gitling/commit/7fdbdb9af6f20aa2b1ed4f8439e61522925cd98a))
+* attention-first workspace sorting and linked worktree discovery ([#54](https://github.com/lcondliffe/gitling/issues/54)) ([124478a](https://github.com/lcondliffe/gitling/commit/124478a5936769c03bcc55883ea64d862ad2e344))
+
 ## [0.6.2](https://github.com/lcondliffe/gitling/compare/v0.6.1...v0.6.2) (2026-09-10)
 
 
