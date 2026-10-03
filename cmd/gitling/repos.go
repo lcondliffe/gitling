@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
@@ -99,8 +101,8 @@ func runRepos(stdout io.Writer, o options, names []string) error {
 				continue
 			}
 			seen[key] = true
-			g := c.common
-			if g == "" {
+			g := realPath(c.common)
+			if c.common == "" {
 				g = "\x00" + key // unopenable: a group of its own
 			}
 			if _, ok := groups[g]; !ok {
@@ -127,12 +129,15 @@ func runRepos(stdout io.Writer, o options, names []string) error {
 	if len(m.Rows)+m.Hidden == 0 {
 		return fmt.Errorf("not a git repository (and no git repositories found in the current directory)")
 	}
-	if o.sort == "attention" {
-		// Stable, so rows of equal rank keep discovery (alphabetical) order.
-		slices.SortStableFunc(m.Rows, func(a, b render.RepoRow) int {
-			return render.Attention(a, now) - render.Attention(b, now)
-		})
-	}
+	// Rows come out grouped by repo; order by name, after rank for attention.
+	slices.SortStableFunc(m.Rows, func(a, b render.RepoRow) int {
+		if o.sort == "attention" {
+			if d := render.Attention(a, now) - render.Attention(b, now); d != 0 {
+				return d
+			}
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
 	render.Repos(stdout, m, o.color)
 	return nil
 }
@@ -203,6 +208,18 @@ func realPath(path string) string {
 
 // displayName is the path relative to the cwd when inside it, else ~-relative.
 func displayName(path string) string {
+	return printable(relName(path))
+}
+
+// printable quotes s if it holds control characters, so a row stays one line.
+func printable(s string) string {
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
+func relName(path string) string {
 	if !filepath.IsAbs(path) {
 		return path
 	}
@@ -223,12 +240,12 @@ func displayName(path string) string {
 func shortErr(err error) string {
 	msg := err.Error()
 	if _, after, ok := strings.Cut(msg, "fatal: "); ok {
-		return after
+		return printable(after)
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return "missing"
 	}
-	return msg
+	return printable(msg)
 }
 
 func warn(path string, err error) {

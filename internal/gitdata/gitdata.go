@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -311,23 +310,31 @@ func (r *Repo) CommonDir() (string, error) {
 
 // Worktrees returns the absolute path of every non-bare checkout of the repo.
 func (r *Repo) Worktrees() ([]string, error) {
-	out, err := r.run("worktree", "list", "--porcelain")
+	// -z: a path may contain newlines.
+	out, err := r.run("worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return nil, err
 	}
 	return parseWorktrees(out), nil
 }
 
-// parseWorktrees reads `git worktree list --porcelain` records.
+// parseWorktrees reads `git worktree list --porcelain -z`: NUL-terminated
+// fields, with an empty field ending each record.
 func parseWorktrees(out string) []string {
 	var paths []string
-	for rec := range strings.SplitSeq(strings.TrimSpace(out), "\n\n") {
-		lines := strings.Split(rec, "\n")
-		path, ok := strings.CutPrefix(lines[0], "worktree ")
-		if !ok || slices.Contains(lines[1:], "bare") {
-			continue
+	path, bare := "", false
+	for f := range strings.SplitSeq(out, "\x00") {
+		switch {
+		case f == "":
+			if path != "" && !bare {
+				paths = append(paths, path)
+			}
+			path, bare = "", false
+		case f == "bare":
+			bare = true
+		case strings.HasPrefix(f, "worktree "):
+			path = strings.TrimPrefix(f, "worktree ")
 		}
-		paths = append(paths, path)
 	}
 	return paths
 }
