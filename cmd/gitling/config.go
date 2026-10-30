@@ -27,6 +27,10 @@ type config struct {
 	// not be silently switched off by naming one more pattern on the command
 	// line.
 	Protect []string `json:"protect"`
+	// Exclude and ExcludeAuthors scope history the way --exclude and
+	// --exclude-author do; those flags add to these lists.
+	Exclude        []string `json:"exclude"`
+	ExcludeAuthors []string `json:"exclude_authors"`
 }
 
 // configPath resolves the config file location, in priority order:

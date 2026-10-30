@@ -93,6 +93,10 @@ func main() {
 	worktreesFlag := flag.Bool("worktrees", false, "multi-repo overview: include each repo's linked worktrees")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	configFlag := flag.String("config", "", "path to config file (default $XDG_CONFIG_HOME/gitling/config.json or ~/.config/gitling/config.json)")
+	var paths, excludePaths, excludeAuthors multiFlag
+	flag.Var(&paths, "path", "limit history to this path (repeatable)")
+	flag.Var(&excludePaths, "exclude", "leave this path out of history (repeatable)")
+	flag.Var(&excludeAuthors, "exclude-author", "leave this author name or email out of history (repeatable)")
 	flag.Usage = usage
 	if err := flag.CommandLine.Parse(args); err != nil {
 		os.Exit(2)
@@ -164,6 +168,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(2)
 	}
+	scopeFlag := explicit["path"] || explicit["exclude"] || explicit["exclude-author"]
+	if scopeFlag && (view == "branches" || view == "compare") {
+		fmt.Fprintf(os.Stderr, "gitling: --path, --exclude and --exclude-author don't apply to the %s view\n", view)
+		os.Exit(2)
+	}
 	if explicit["base"] && view != "compare" {
 		fmt.Fprintln(os.Stderr, "gitling: --base only applies to the compare view")
 		os.Exit(2)
@@ -225,6 +234,13 @@ func main() {
 		only:      *onlyFlag,
 		worktrees: *worktreesFlag,
 		base:      *base,
+		scopeFlag: scopeFlag,
+		// Configured excludes add to the flags, like tidy's protect list.
+		scope: gitdata.Scope{
+			Paths:          paths,
+			ExcludePaths:   append(cfg.Exclude, excludePaths...),
+			ExcludeAuthors: append(cfg.ExcludeAuthors, excludeAuthors...),
+		},
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "gitling:", err)
 		os.Exit(1)
@@ -253,6 +269,11 @@ Flags:
   --branches       show the branch overview drill-down
   --base <rev>     compare view only: what HEAD is compared against
                     (default: origin/HEAD, else local main or master)
+  --path <p>       limit activity, contributors, churn and growth to a path
+                    (repeatable; git pathspec from the repo root)
+  --exclude <p>    leave a path out of those panels (repeatable)
+  --exclude-author <who>
+                   leave an author name or email out of them (repeatable)
   --recent <n>     recent commits listed on the dashboard, 0 hides them (default 5)
   --layout <mode>  dashboard layout: auto, wide, stack, compact (default auto)
   --bucket <b>     activity graph bucket: day, week, month (default day)
@@ -277,7 +298,8 @@ pass --apply, and it is the only subcommand that changes anything.
 
 Config file (optional, JSON) may set defaults for "since", "color", "bucket",
 "recent", "layout", and "prs"; command-line flags always override it.
---no-color overrides both.
+--no-color overrides both. Its "exclude" and "exclude_authors" lists are
+always applied, and --exclude / --exclude-author add to them.
 
 Run inside a git repository. Run in a directory whose subdirectories are git
 repositories to get a one-line-per-repo overview instead: branch, ahead/behind
@@ -304,6 +326,8 @@ type options struct {
 	only      string // multi-repo overview filter: "" or "attention"
 	worktrees bool   // multi-repo overview: include linked worktrees
 	base      string // compare view: base revision; empty means the default branch
+	scope     gitdata.Scope
+	scopeFlag bool // scope was named on the command line, not only in config
 }
 
 func run(stdout io.Writer, o options) error {
@@ -320,6 +344,9 @@ func run(stdout io.Writer, o options) error {
 		// asked about one repo's history, which doesn't exist here.
 		if o.view == "dashboard" {
 			if repos := childRepos("."); len(repos) > 0 {
+				if o.scopeFlag {
+					return fmt.Errorf("--path, --exclude and --exclude-author don't apply to the multi-repo overview")
+				}
 				return runRepos(stdout, o, repos)
 			}
 		}
@@ -381,8 +408,16 @@ func run(stdout io.Writer, o options) error {
 		close(prs)
 	}
 
+	// Scoped runs bypass the cache entirely, so they can never read or
+	// overwrite unscoped totals.
+	scoped := !o.scope.IsZero()
 	store := cache.New(gitDir, o.dateBasis)
-	agg, lastHash, ok := store.Load()
+	var agg *aggregate.Aggregates
+	var lastHash string
+	var ok bool
+	if !scoped {
+		agg, lastHash, ok = store.Load()
+	}
 	if !ok {
 		agg = aggregate.New()
 	}
@@ -408,14 +443,16 @@ func run(stdout io.Writer, o options) error {
 		}
 
 		if !(ok && lastHash == head) {
-			commits, err := repo.Commits(revRange)
+			commits, err := repo.Commits(revRange, o.scope)
 			if err != nil {
 				return err
 			}
 			agg.Merge(commits, o.dateBasis)
-			if err := store.Save(agg, head); err != nil {
-				// Cache is an optimization, not correctness; warn and continue.
-				fmt.Fprintln(os.Stderr, "gitling: warning: cache write failed:", err)
+			if !scoped {
+				if err := store.Save(agg, head); err != nil {
+					// Cache is an optimization, not correctness; warn and continue.
+					fmt.Fprintln(os.Stderr, "gitling: warning: cache write failed:", err)
+				}
 			}
 		}
 	}
@@ -429,6 +466,13 @@ func run(stdout io.Writer, o options) error {
 		Height:     o.height,
 		Shallow:    repo.IsShallow(),
 		DateBasis:  o.dateBasis,
+		Scope:      o.scope,
+	}
+	if scoped && !o.json {
+		fmt.Fprintln(stdout, "scope · "+o.scope.String())
+		if m.Height > 0 {
+			m.Height--
+		}
 	}
 	m.Days = agg.DailyCounts(sinceTime, now)
 	m.TotalCommits = aggregate.TotalCommits(m.Days)

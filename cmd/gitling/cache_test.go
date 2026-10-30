@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
 // The cache-invalidation branches in run() decide whether history is walked
@@ -122,5 +125,50 @@ func TestRunCachePaths(t *testing.T) {
 				t.Errorf("total commits = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// A scoped run must neither read nor overwrite the unscoped cache, and its
+// panels must all agree on the filtered history.
+func TestRunScopeBypassesCache(t *testing.T) {
+	dir := newRepo(t, 3)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "a.txt")
+	git(t, dir, "commit", "-q", "-m", "a")
+	if got := totalCommits(t, dir); got != 4 {
+		t.Fatalf("unscoped total = %d, want 4", got)
+	}
+
+	var buf bytes.Buffer
+	o := options{view: "dashboard", bucket: "day", dateBasis: aggregate.AuthorDate, layout: "stack", json: true,
+		scope: gitdata.Scope{Paths: []string{"a.txt"}}}
+	if err := run(&buf, o); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var m struct {
+		Scope    *gitdata.Scope `json:"scope"`
+		Activity struct {
+			TotalCommits int `json:"total_commits"`
+		} `json:"activity"`
+		Contributors []struct{ Commits int } `json:"contributors"`
+		HotFiles     []struct{ Path string } `json:"hot_files"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Scope == nil || len(m.Scope.Paths) != 1 {
+		t.Errorf("scope = %+v, want paths [a.txt]", m.Scope)
+	}
+	if m.Activity.TotalCommits != 1 || len(m.Contributors) != 1 || m.Contributors[0].Commits != 1 {
+		t.Errorf("scoped totals: activity %d, contributors %+v; want 1 and 1", m.Activity.TotalCommits, m.Contributors)
+	}
+	if len(m.HotFiles) != 1 || m.HotFiles[0].Path != "a.txt" {
+		t.Errorf("hot files = %+v, want only a.txt", m.HotFiles)
+	}
+
+	if got := totalCommits(t, dir); got != 4 {
+		t.Errorf("unscoped total after scoped run = %d, want 4", got)
 	}
 }

@@ -12,7 +12,7 @@ func BenchmarkShellCommits(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := r.Commits(""); err != nil {
+		if _, err := r.Commits("", Scope{}); err != nil {
 			b.Fatalf("Commits: %v", err)
 		}
 	}

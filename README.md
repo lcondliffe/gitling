@@ -74,6 +74,8 @@ gitling --layout stack   # force one column; --layout wide forces two
 gitling --layout compact # prioritize current state in short panes
 gitling --prs=false      # skip the open pull requests panel
 gitling --json           # structured dashboard data for scripts/integrations
+gitling --path services/api --exclude '*.lock'  # scope history to part of a monorepo
+gitling --exclude-author 'renovate[bot]'        # leave an automation account out
 gitling --date commit    # bucket by commit date instead of author date
 gitling --color=always   # always, never, or auto (default; honors NO_COLOR)
 gitling --config ~/gitling.json  # use an explicit config file
@@ -94,6 +96,14 @@ HEAD, using author dates by default (`--date commit` selects committer dates).
 They do not count every branch. Recent commits ignore `--since`, include merges
 and use committer dates. Repo/branch state, open PRs, the multi-repo overview
 and `tidy` are live-state views, not filtered history.
+
+`--path` and `--exclude` (both repeatable) are git pathspecs from the repo
+root, so `--exclude '*.lock'` matches lockfiles at any depth. `--exclude-author`
+drops commits whose (mailmap-resolved) author name or email matches exactly,
+ignoring case; bots are never guessed. The scope applies to activity,
+contributors, churn and growth before anything is counted, so all of them
+agree. It does not apply to recent commits or live state. A scoped run prints
+its scope (and adds a `scope` object to `--json`) and skips the history cache.
 
 The heatmap prints the requested date interval, with year context, and a
 compact intensity ramp (zero through the requested interval's daily peak;
@@ -243,14 +253,17 @@ stderr.
   "recent": 5,
   "layout": "auto",
   "prs": true,
-  "protect": ["release/*", "wip/keep-me"]
+  "protect": ["release/*", "wip/keep-me"],
+  "exclude": ["*.lock", "*package-lock.json"],
+  "exclude_authors": ["dependabot[bot]"]
 }
 ```
 
 Command-line flags override the config file, which overrides the built-in
-defaults. `protect` is the exception: `--protect` adds to the configured list
-rather than replacing it, since a config saying "never delete `release/*`"
-shouldn't be switched off by naming one more pattern.
+defaults. `protect`, `exclude` and `exclude_authors` are the exception: their
+flags add to the configured list rather than replacing it, since a config
+saying "never delete `release/*`" shouldn't be switched off by naming one more
+pattern.
 
 ## Build
 
