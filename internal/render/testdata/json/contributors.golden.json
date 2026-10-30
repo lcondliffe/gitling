@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "view": "contributors",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "scope": {
+    "range": "last 1y",
+    "date_basis": "author"
+  },
+  "contributors": [
+    {
+      "email": "ada@example.com",
+      "name": "Ada Lovelace",
+      "commits": 42
+    },
+    {
+      "email": "alan@example.com",
+      "name": "Alan Turing",
+      "commits": 27
+    },
+    {
+      "email": "grace@example.com",
+      "name": "Grace Hopper",
+      "commits": 15
+    },
+    {
+      "email": "margaret@example.com",
+      "name": "Margaret Hamilton",
+      "commits": 9
+    },
+    {
+      "email": "katherine@example.com",
+      "name": "Katherine Johnson",
+      "commits": 3
+    }
+  ]
+}

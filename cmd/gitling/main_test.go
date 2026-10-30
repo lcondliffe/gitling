@@ -1,20 +1,51 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lcondliffe/gitling/internal/aggregate"
 )
 
-// The guard rejects the combination before any git call, so this needs no repo.
-func TestRunRejectsJSONWithDrillDown(t *testing.T) {
-	for _, view := range []string{"graph", "churn", "contributors", "branches"} {
-		err := run(io.Discard, options{json: true, view: view})
-		if err == nil || !strings.Contains(err.Error(), "--json") {
-			t.Errorf("run(--json %s) = %v, want a --json error", view, err)
+// Every view serves versioned JSON naming itself, without the checkout path.
+func TestRunJSONEveryView(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH; skipping integration test")
+	}
+	dir := filepath.Join(t.TempDir(), "proj")
+	initRepo(t, dir)
+	gitIn(t, dir, "remote", "add", "origin", "https://user:secret@github.com/acme/proj.git")
+	t.Chdir(dir)
+
+	for _, view := range []string{"dashboard", "graph", "churn", "contributors", "branches", "compare"} {
+		var buf bytes.Buffer
+		o := options{json: true, view: view, bucket: "day", dateBasis: aggregate.AuthorDate, layout: "auto"}
+		if err := run(&buf, o); err != nil {
+			t.Fatalf("run(--json %s): %v", view, err)
+		}
+		var got struct {
+			SchemaVersion int    `json:"schema_version"`
+			View          string `json:"view"`
+			Repository    struct {
+				Name   string `json:"name"`
+				Remote string `json:"remote"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("%s: invalid JSON: %v", view, err)
+		}
+		if got.SchemaVersion != 1 || got.View != view || got.Repository.Name != "proj" ||
+			got.Repository.Remote != "https://github.com/acme/proj.git" {
+			t.Errorf("%s: header = %+v", view, got)
+		}
+		if strings.Contains(buf.String(), filepath.Dir(dir)) || strings.Contains(buf.String(), "secret") {
+			t.Errorf("%s: output leaks a path or credential:\n%s", view, buf.String())
 		}
 	}
 }

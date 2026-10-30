@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "view": "branches",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "branches": [
+    {
+      "name": "main",
+      "current": true,
+      "upstream": "origin/main",
+      "gone": false,
+      "merged": false,
+      "tip": "",
+      "checked_out": false,
+      "compare_ref": "origin/main",
+      "ahead": 0,
+      "behind": 0,
+      "last_commit": "2024-06-15T10:00:00Z",
+      "last_author": "Ada Lovelace"
+    },
+    {
+      "name": "feature/heatmap",
+      "current": false,
+      "upstream": null,
+      "gone": false,
+      "merged": false,
+      "tip": "",
+      "checked_out": true,
+      "compare_ref": "main",
+      "ahead": 5,
+      "behind": 1,
+      "last_commit": "2024-06-12T12:00:00Z",
+      "last_author": "Alan Turing"
+    },
+    {
+      "name": "stale/old-experiment",
+      "current": false,
+      "upstream": null,
+      "gone": true,
+      "merged": false,
+      "tip": "",
+      "checked_out": false,
+      "compare_ref": null,
+      "ahead": null,
+      "behind": null,
+      "last_commit": "2024-05-06T12:00:00Z",
+      "last_author": "Grace Hopper"
+    },
+    {
+      "name": "chore/no-upstream-in-sync",
+      "current": false,
+      "upstream": null,
+      "gone": false,
+      "merged": false,
+      "tip": "",
+      "checked_out": false,
+      "compare_ref": null,
+      "ahead": null,
+      "behind": null,
+      "last_commit": "2024-06-15T11:55:00Z",
+      "last_author": "Margaret Hamilton"
+    }
+  ]
+}

@@ -1,0 +1,439 @@
+{
+  "schema_version": 1,
+  "view": "dashboard",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "scope": {
+    "range": "last 10 weeks",
+    "date_basis": "author"
+  },
+  "range": "last 10 weeks",
+  "vitals": {
+    "branch": "main",
+    "detached": false,
+    "has_upstream": true,
+    "ahead": 2,
+    "behind": 1,
+    "operation": null,
+    "last_fetch": "2024-06-15T09:00:00Z",
+    "dirty_files": 3,
+    "staged": 1,
+    "modified": 1,
+    "untracked": 1,
+    "conflicts": 0,
+    "stash_count": 1,
+    "oldest_stash": "2024-05-06T12:00:00Z",
+    "branch_count": 6,
+    "merged_branches": 2,
+    "gone_branches": 1,
+    "stale_branches": 3,
+    "stale_after_days": 90
+  },
+  "activity": {
+    "days": [
+      {
+        "date": "2024-04-07",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-08",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-09",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-10",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-11",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-12",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-13",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-14",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-15",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-16",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-17",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-18",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-19",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-20",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-21",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-22",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-23",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-24",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-25",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-26",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-27",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-28",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-29",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-30",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-01",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-02",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-03",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-04",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-05",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-06",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-07",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-08",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-09",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-10",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-11",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-12",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-13",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-14",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-15",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-16",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-17",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-18",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-19",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-20",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-21",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-22",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-23",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-24",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-25",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-26",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-27",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-28",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-29",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-30",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-31",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-01",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-02",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-03",
+        "commits": 1
+      },
+      {
+        "date": "2024-06-04",
+        "commits": 2
+      },
+      {
+        "date": "2024-06-05",
+        "commits": 4
+      },
+      {
+        "date": "2024-06-06",
+        "commits": 8
+      },
+      {
+        "date": "2024-06-07",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-08",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-09",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-10",
+        "commits": 1
+      },
+      {
+        "date": "2024-06-11",
+        "commits": 2
+      },
+      {
+        "date": "2024-06-12",
+        "commits": 4
+      },
+      {
+        "date": "2024-06-13",
+        "commits": 8
+      },
+      {
+        "date": "2024-06-14",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-15",
+        "commits": 0
+      }
+    ],
+    "total_commits": 180,
+    "streak_days": 3,
+    "bucket": "day",
+    "buckets": []
+  },
+  "contributors": [
+    {
+      "email": "ada@example.com",
+      "name": "Ada Lovelace",
+      "commits": 42
+    },
+    {
+      "email": "alan@example.com",
+      "name": "Alan Turing",
+      "commits": 27
+    },
+    {
+      "email": "grace@example.com",
+      "name": "Grace Hopper",
+      "commits": 15
+    },
+    {
+      "email": "margaret@example.com",
+      "name": "Margaret Hamilton",
+      "commits": 9
+    },
+    {
+      "email": "katherine@example.com",
+      "name": "Katherine Johnson",
+      "commits": 3
+    }
+  ],
+  "growth": {
+    "total_loc": 19302,
+    "pct": 18.4,
+    "has_pct": true,
+    "series": [
+      8400,
+      8837,
+      9311,
+      9822,
+      10370,
+      10770,
+      11207,
+      11681,
+      12192,
+      12740,
+      13140,
+      13577,
+      14051,
+      14562,
+      15110,
+      15510,
+      15947,
+      16421,
+      16932,
+      17480,
+      17880,
+      18317,
+      18791,
+      19302
+    ]
+  },
+  "hot_files": [
+    {
+      "path": "internal/render/render.go",
+      "commits": 31
+    },
+    {
+      "path": "internal/aggregate/aggregate.go",
+      "commits": 18
+    },
+    {
+      "path": "cmd/gitling/main.go",
+      "commits": 12
+    },
+    {
+      "path": "go.mod",
+      "commits": 2
+    }
+  ],
+  "recent": [
+    {
+      "hash": "",
+      "short": "2440dfe",
+      "subject": "fix: make release publishing rerunnable",
+      "author": "Ada Lovelace",
+      "date": "2024-06-15T10:00:00Z",
+      "pr": 18,
+      "merge": false
+    },
+    {
+      "hash": "",
+      "short": "f1264c7",
+      "subject": "build(deps): bump golang.org/x/net",
+      "author": "dependabot[bot]",
+      "date": "2024-06-14T10:00:00Z",
+      "pr": 17,
+      "merge": false
+    },
+    {
+      "hash": "",
+      "short": "045f117",
+      "subject": "feat: add the widget",
+      "author": "Alan Turing",
+      "date": "2024-06-12T12:00:00Z",
+      "pr": 11,
+      "merge": true
+    },
+    {
+      "hash": "",
+      "short": "6f5de0e",
+      "subject": "chore: local commit, never went through a PR",
+      "author": "Grace Hopper",
+      "date": "2024-06-06T12:00:00Z",
+      "pr": null,
+      "merge": false
+    }
+  ],
+  "open_prs": [],
+  "forge": null
+}

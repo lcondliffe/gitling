@@ -77,10 +77,15 @@ printf '%s' '[{"number":7,"title":"t","author":{"login":"ada"},"isDraft":false,"
 		t.Errorf("plain directory listed as a repo:\n%s", out)
 	}
 
-	// --json has no overview shape yet; asking for it is an error, not silence.
 	opts.json = true
-	if err := run(&buf, opts); err == nil || !strings.Contains(err.Error(), "--json") {
-		t.Errorf("run(json): want --json error, got %v", err)
+	buf.Reset()
+	if err := run(&buf, opts); err != nil {
+		t.Fatalf("run(json): %v", err)
+	}
+	for _, want := range []string{`"view": "workspace"`, `"repository": null`, `"name": "beta"`, `"open_prs": 1`} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("workspace JSON should contain %s:\n%s", want, buf.String())
+		}
 	}
 	opts.json = false
 

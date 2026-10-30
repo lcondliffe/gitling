@@ -61,10 +61,6 @@ type checkout struct {
 // PR count) per checkout. Read-only apart from --fetch; per-checkout failures
 // stay in the list and are warned about on stderr.
 func runRepos(stdout io.Writer, o options, names []string) error {
-	if o.json {
-		return errors.New("--json is not available for the multi-repo overview")
-	}
-
 	// Open each child repo and, with --worktrees, list its linked worktrees.
 	found := make([][]checkout, len(names))
 	bounded(len(names), func(i int) {
@@ -138,6 +134,9 @@ func runRepos(stdout io.Writer, o options, names []string) error {
 		}
 		return strings.Compare(a.Name, b.Name)
 	})
+	if o.json {
+		return render.ReposJSON(stdout, m)
+	}
 	render.Repos(stdout, m, o.color)
 	return nil
 }

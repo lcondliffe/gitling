@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "view": "churn",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "scope": {
+    "range": "last 1y",
+    "date_basis": "commit",
+    "paths": [
+      "internal"
+    ],
+    "exclude_paths": [
+      "*.lock"
+    ],
+    "exclude_authors": [
+      "renovate[bot]"
+    ]
+  },
+  "files": [
+    {
+      "path": "internal/render/render.go",
+      "commits": 31
+    },
+    {
+      "path": "internal/aggregate/aggregate.go",
+      "commits": 18
+    },
+    {
+      "path": "cmd/gitling/main.go",
+      "commits": 12
+    },
+    {
+      "path": "go.mod",
+      "commits": 2
+    }
+  ]
+}

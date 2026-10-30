@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "view": "compare",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "head": "feature/compare",
+  "base": "origin/main",
+  "base_oid": "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "head_oid": "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "merge_base": "3333333ccccccccccccccccccccccccccccccccc",
+  "shallow": true,
+  "commit_count": 12,
+  "commits_truncated": true,
+  "commits": [
+    {
+      "hash": "",
+      "short": "2222222",
+      "subject": "feat: compare view",
+      "author": "Ada Lovelace",
+      "date": "2024-06-15T10:00:00Z",
+      "pr": null,
+      "merge": false
+    },
+    {
+      "hash": "",
+      "short": "4444444",
+      "subject": "test: odd filenames",
+      "author": "Alan Turing",
+      "date": "2024-06-14T10:00:00Z",
+      "pr": null,
+      "merge": false
+    }
+  ],
+  "files": [
+    {
+      "path": "internal/gitdata/compare.go",
+      "old_path": null,
+      "insertions": 120,
+      "deletions": 4,
+      "binary": false
+    },
+    {
+      "path": "docs/new.md",
+      "old_path": "docs/old.md",
+      "insertions": 3,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "line\nbreak.txt",
+      "old_path": null,
+      "insertions": 1,
+      "deletions": 0,
+      "binary": false
+    },
+    {
+      "path": "logo.png",
+      "old_path": null,
+      "insertions": null,
+      "deletions": null,
+      "binary": true
+    },
+    {
+      "path": "gen/file00.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file01.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file02.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file03.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file04.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file05.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file06.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file07.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file08.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file09.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file10.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file11.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file12.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file13.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    },
+    {
+      "path": "gen/file14.go",
+      "old_path": null,
+      "insertions": 0,
+      "deletions": 1,
+      "binary": false
+    }
+  ],
+  "insertions": 124,
+  "deletions": 5
+}

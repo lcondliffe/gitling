@@ -3,6 +3,7 @@ package render
 import (
 	"encoding/json"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
@@ -10,26 +11,80 @@ import (
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
+// SchemaVersion is bumped only for breaking changes; new keys are additive.
+const SchemaVersion = 1
+
+// Repository identifies the repo a single-repo view describes.
+type Repository struct {
+	Name   string // repo directory name, shared by all its worktrees
+	Remote string // origin URL, raw; sanitized on output
+}
+
+// jsonHeader leads every JSON document. Repository is null for the workspace view.
+type jsonHeader struct {
+	SchemaVersion int             `json:"schema_version"`
+	View          string          `json:"view"`
+	GeneratedAt   string          `json:"generated_at"`
+	Repository    *jsonRepository `json:"repository"`
+}
+
+type jsonRepository struct {
+	Name   string  `json:"name"`
+	Remote *string `json:"remote"`
+}
+
+// jsonScope is the history window a view was computed over, plus any
+// filters (omitted when unfiltered).
+type jsonScope struct {
+	Range     string `json:"range"`
+	DateBasis string `json:"date_basis"`
+	gitdata.Scope
+}
+
+func header(view string, repo *Repository, now time.Time) jsonHeader {
+	h := jsonHeader{SchemaVersion: SchemaVersion, View: view, GeneratedAt: now.Format(time.RFC3339)}
+	if repo != nil {
+		h.Repository = &jsonRepository{Name: repo.Name, Remote: jsonRemote(repo.Remote)}
+	}
+	return h
+}
+
+// jsonRemote drops credentials from a URL remote and hides local-path remotes,
+// which would leak private filesystem paths.
+func jsonRemote(s string) *string {
+	u, err := url.Parse(s)
+	switch {
+	case err == nil && u.Host != "" && u.Scheme != "file":
+		u.User = nil
+		s = u.String()
+	case err == nil:
+		return nil // empty, a local path, or a file:// URL
+	}
+	// Otherwise scp-like (git@host:path), which can't carry a password.
+	return &s
+}
+
+func encode(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
 // JSON prints the dashboard model as stable, machine-readable data for scripts
 // and integrations. It deliberately mirrors the human dashboard sections while
 // using snake_case keys and date-only strings for local calendar buckets.
-func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) error {
+func JSON(w io.Writer, repo Repository, m Model, bucket string, buckets []aggregate.PeriodCount) error {
 	pct := (*float64)(nil)
 	if m.Growth.HasPct {
 		pct = &m.Growth.Pct
 	}
 
 	out := jsonModel{
-		Range:       m.RangeLabel,
-		GeneratedAt: m.Now.Format(time.RFC3339),
-		Vitals:      jsonVitalsOf(m.Vitals),
-		Activity: jsonActivity{
-			Days:         jsonDays(m.Days),
-			TotalCommits: m.TotalCommits,
-			StreakDays:   m.Streak,
-			Bucket:       bucket,
-			Buckets:      jsonBuckets(buckets),
-		},
+		jsonHeader:   header("dashboard", &repo, m.Now),
+		Scope:        jsonScope{m.RangeLabel, string(m.DateBasis), m.Scope},
+		Range:        m.RangeLabel,
+		Vitals:       jsonVitalsOf(m.Vitals),
+		Activity:     jsonActivityOf(m.Days, m.TotalCommits, m.Streak, bucket, buckets),
 		Contributors: jsonContributors(m.Contributors),
 		Growth: jsonGrowth{
 			TotalLOC: m.Growth.TotalLOC,
@@ -42,19 +97,13 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 		OpenPRs:  jsonPRs(m.PRs.Items),
 		Forge:    jsonForgeOf(m.PRs),
 	}
-	if !m.Scope.IsZero() {
-		out.Scope = &m.Scope
-	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return encode(w, out)
 }
 
 type jsonModel struct {
-	Range        string            `json:"range"`
-	GeneratedAt  string            `json:"generated_at"`
-	Scope        *gitdata.Scope    `json:"scope,omitempty"` // absent when unscoped
+	jsonHeader
+	Scope        jsonScope         `json:"scope"`
+	Range        string            `json:"range"` // kept for compatibility; same as scope.range
 	Vitals       jsonVitals        `json:"vitals"`
 	Activity     jsonActivity      `json:"activity"`
 	Contributors []jsonContributor `json:"contributors"`
@@ -174,15 +223,20 @@ func jsonVitalsOf(v gitdata.Vitals) jsonVitals {
 		StaleBranches:  v.StaleBranches,
 		StaleAfterDays: v.StaleAfterDays,
 	}
-	if v.Operation.InProgress() {
-		op := jsonOperation{Kind: v.Operation.Kind}
-		if v.Operation.Total > 0 {
-			step, total := v.Operation.Step, v.Operation.Total
-			op.Step, op.Total = &step, &total
-		}
-		out.Operation = &op
-	}
+	out.Operation = jsonOperationOf(v.Operation)
 	return out
+}
+
+func jsonOperationOf(o gitdata.Operation) *jsonOperation {
+	if !o.InProgress() {
+		return nil
+	}
+	op := jsonOperation{Kind: o.Kind}
+	if o.Total > 0 {
+		step, total := o.Step, o.Total
+		op.Step, op.Total = &step, &total
+	}
+	return &op
 }
 
 // jsonTime renders t as RFC 3339, or null for the zero time.
@@ -200,6 +254,16 @@ type jsonActivity struct {
 	StreakDays   int          `json:"streak_days"`
 	Bucket       string       `json:"bucket"`
 	Buckets      []jsonBucket `json:"buckets"`
+}
+
+func jsonActivityOf(days []aggregate.DayCount, total, streak int, bucket string, buckets []aggregate.PeriodCount) jsonActivity {
+	return jsonActivity{
+		Days:         jsonDays(days),
+		TotalCommits: total,
+		StreakDays:   streak,
+		Bucket:       bucket,
+		Buckets:      jsonBuckets(buckets),
+	}
 }
 
 type jsonDay struct {
@@ -296,4 +360,172 @@ func jsonHotFiles(files []aggregate.FileChurn) []jsonHotFile {
 		})
 	}
 	return out
+}
+
+// GraphJSON prints the activity drill-down.
+func GraphJSON(w io.Writer, repo Repository, m GraphModel) error {
+	return encode(w, struct {
+		jsonHeader
+		Scope    jsonScope    `json:"scope"`
+		Activity jsonActivity `json:"activity"`
+	}{
+		header("graph", &repo, m.Now),
+		jsonScope{m.RangeLabel, string(m.DateBasis), m.Scope},
+		jsonActivityOf(m.Days, m.TotalCommits, m.Streak, m.Bucket, m.Buckets),
+	})
+}
+
+// ChurnJSON prints every file touched in range, most-touched first.
+func ChurnJSON(w io.Writer, repo Repository, m ChurnModel) error {
+	return encode(w, struct {
+		jsonHeader
+		Scope jsonScope     `json:"scope"`
+		Files []jsonHotFile `json:"files"`
+	}{header("churn", &repo, m.Now), jsonScope{m.RangeLabel, string(m.DateBasis), m.Scope}, jsonHotFiles(m.Files)})
+}
+
+// ContributorsJSON prints every author in range, most commits first.
+func ContributorsJSON(w io.Writer, repo Repository, m ContributorsModel) error {
+	return encode(w, struct {
+		jsonHeader
+		Scope        jsonScope         `json:"scope"`
+		Contributors []jsonContributor `json:"contributors"`
+	}{header("contributors", &repo, m.Now), jsonScope{m.RangeLabel, string(m.DateBasis), m.Scope}, jsonContributors(m.Contributors)})
+}
+
+// jsonBranch mirrors gitdata.Branch. The worktree path is reduced to a flag so
+// private checkout locations stay out of the output.
+type jsonBranch struct {
+	Name       string  `json:"name"`
+	Current    bool    `json:"current"`
+	Upstream   *string `json:"upstream"`
+	Gone       bool    `json:"gone"`
+	Merged     bool    `json:"merged"`
+	Tip        string  `json:"tip"`
+	CheckedOut bool    `json:"checked_out"`
+	CompareRef *string `json:"compare_ref"`
+	Ahead      *int    `json:"ahead"`
+	Behind     *int    `json:"behind"`
+	LastCommit *string `json:"last_commit"`
+	LastAuthor string  `json:"last_author"`
+}
+
+// BranchesJSON prints every local branch.
+func BranchesJSON(w io.Writer, repo Repository, m BranchesModel) error {
+	branches := make([]jsonBranch, 0, len(m.Branches))
+	for _, b := range m.Branches {
+		jb := jsonBranch{
+			Name: b.Name, Current: b.IsHead, Upstream: optString(b.Upstream), Gone: b.Gone,
+			Merged: b.Merged, Tip: b.Tip, CheckedOut: b.Worktree != "",
+			LastCommit: jsonTime(b.LastCommit), LastAuthor: b.LastAuthor,
+		}
+		if b.HasCompare {
+			ahead, behind := b.Ahead, b.Behind
+			jb.CompareRef, jb.Ahead, jb.Behind = optString(b.CompareRef), &ahead, &behind
+		}
+		branches = append(branches, jb)
+	}
+	return encode(w, struct {
+		jsonHeader
+		Branches []jsonBranch `json:"branches"`
+	}{header("branches", &repo, m.Now), branches})
+}
+
+// jsonFileChange is one changed path; counts are null for binary files.
+type jsonFileChange struct {
+	Path       string  `json:"path"`
+	OldPath    *string `json:"old_path"`
+	Insertions *int    `json:"insertions"`
+	Deletions  *int    `json:"deletions"`
+	Binary     bool    `json:"binary"`
+}
+
+// CompareJSON prints the branch comparison. Files are complete; commits are
+// capped, with commit_count and commits_truncated describing the rest.
+func CompareJSON(w io.Writer, repo Repository, m CompareModel) error {
+	c := m.Compare
+	files := make([]jsonFileChange, 0, len(c.Files))
+	for _, f := range c.Files {
+		jf := jsonFileChange{Path: f.Path, OldPath: optString(f.OldPath), Binary: f.Binary}
+		if !f.Binary {
+			ins, del := f.Insertions, f.Deletions
+			jf.Insertions, jf.Deletions = &ins, &del
+		}
+		files = append(files, jf)
+	}
+	return encode(w, struct {
+		jsonHeader
+		Head             string           `json:"head"`
+		Base             string           `json:"base"`
+		BaseOID          string           `json:"base_oid"`
+		HeadOID          string           `json:"head_oid"`
+		MergeBase        string           `json:"merge_base"`
+		Shallow          bool             `json:"shallow"`
+		CommitCount      int              `json:"commit_count"`
+		CommitsTruncated bool             `json:"commits_truncated"`
+		Commits          []jsonRecent     `json:"commits"`
+		Files            []jsonFileChange `json:"files"`
+		Insertions       int              `json:"insertions"`
+		Deletions        int              `json:"deletions"`
+	}{
+		header("compare", &repo, m.Now), m.Head, c.Base, c.BaseOID, c.HeadOID, c.MergeBase, m.Shallow,
+		c.CommitCount, c.CommitCount > len(c.Commits), jsonRecents(c.Commits), files, c.Insertions, c.Deletions,
+	})
+}
+
+// jsonCheckout is one workspace row. Status is null when the checkout couldn't
+// be probed, with the reason in error.
+type jsonCheckout struct {
+	Name          string              `json:"name"`
+	Error         *string             `json:"error"`
+	Status        *jsonCheckoutStatus `json:"status"`
+	FetchFailed   bool                `json:"fetch_failed"`
+	OpenPRs       int                 `json:"open_prs"`
+	OpenPRsCapped bool                `json:"open_prs_capped"` // same as forge.truncated
+	Forge         *jsonForge          `json:"forge"`
+}
+
+// jsonCheckoutStatus is the Repo.Status subset of jsonVitals.
+type jsonCheckoutStatus struct {
+	Branch      string         `json:"branch"`
+	Detached    bool           `json:"detached"`
+	HasUpstream bool           `json:"has_upstream"`
+	Ahead       int            `json:"ahead"`
+	Behind      int            `json:"behind"`
+	Operation   *jsonOperation `json:"operation"`
+	LastFetch   *string        `json:"last_fetch"`
+	DirtyFiles  int            `json:"dirty_files"`
+	Staged      int            `json:"staged"`
+	Modified    int            `json:"modified"`
+	Untracked   int            `json:"untracked"`
+	Conflicts   int            `json:"conflicts"`
+}
+
+// ReposJSON prints the multi-repo workspace overview.
+func ReposJSON(w io.Writer, m ReposModel) error {
+	rows := make([]jsonCheckout, 0, len(m.Rows))
+	for _, r := range m.Rows {
+		jc := jsonCheckout{Name: r.Name, Error: optString(r.Err), FetchFailed: r.FetchFailed, OpenPRs: len(r.PRs.Items), OpenPRsCapped: r.PRs.Truncated, Forge: jsonForgeOf(r.PRs)}
+		if r.Err == "" {
+			v := r.Vitals
+			jc.Status = &jsonCheckoutStatus{
+				Branch: v.Branch, Detached: v.Detached, HasUpstream: v.HasUpstream, Ahead: v.Ahead, Behind: v.Behind,
+				Operation: jsonOperationOf(v.Operation), LastFetch: jsonTime(v.LastFetch), DirtyFiles: v.DirtyFiles,
+				Staged: v.Staged, Modified: v.Modified, Untracked: v.Untracked, Conflicts: v.Conflicts,
+			}
+		}
+		rows = append(rows, jc)
+	}
+	return encode(w, struct {
+		jsonHeader
+		Hidden    int            `json:"hidden"`
+		Checkouts []jsonCheckout `json:"checkouts"`
+	}{header("workspace", nil, m.Now), m.Hidden, rows})
+}
+
+func optString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

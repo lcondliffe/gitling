@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
@@ -311,6 +312,69 @@ func goldenCompareModel() CompareModel {
 		c.Files = append(c.Files, gitdata.FileChange{Path: fmt.Sprintf("gen/file%02d.go", i), Deletions: 1})
 	}
 	return CompareModel{Head: "feature/compare", Compare: c, Shallow: true, Now: goldenNow}
+}
+
+// TestGoldenJSON pins the JSON contract of every view. Fixtures carry a private
+// worktree path and a credentialed remote that must never reach the output.
+func TestGoldenJSON(t *testing.T) {
+	const private = "/home/me/private"
+	repo := Repository{Name: "gitling", Remote: "https://me:token@github.com/lcondliffe/gitling.git"}
+
+	dash := goldenModel()
+	dash.DateBasis = aggregate.AuthorDate
+	graph := goldenGraphModel()
+	graph.DateBasis = aggregate.AuthorDate
+	churn := goldenChurnModel()
+	churn.DateBasis = aggregate.CommitDate
+	churn.Scope = gitdata.Scope{Paths: []string{"internal"}, ExcludePaths: []string{"*.lock"}, ExcludeAuthors: []string{"renovate[bot]"}}
+	contrib := goldenContributorsModel()
+	contrib.DateBasis = aggregate.AuthorDate
+	branches := goldenBranchesModel()
+	branches.Branches[1].Worktree = private + "/heatmap-wt"
+	workspace := ReposModel{Now: goldenNow, Hidden: 2, Rows: []RepoRow{
+		{Name: "gitling", Vitals: goldenVitals(), PRs: forge.Result{CLI: "gh", Status: forge.OK, Items: make([]forge.PR, 50), Truncated: true, CheckedAt: goldenNow}},
+		{Name: "broken", Err: "missing"},
+	}}
+
+	for name, write := range map[string]func(*bytes.Buffer) error{
+		"dashboard":    func(b *bytes.Buffer) error { return JSON(b, repo, dash, "day", nil) },
+		"graph":        func(b *bytes.Buffer) error { return GraphJSON(b, repo, graph) },
+		"churn":        func(b *bytes.Buffer) error { return ChurnJSON(b, repo, churn) },
+		"contributors": func(b *bytes.Buffer) error { return ContributorsJSON(b, repo, contrib) },
+		"branches":     func(b *bytes.Buffer) error { return BranchesJSON(b, repo, branches) },
+		"compare":      func(b *bytes.Buffer) error { return CompareJSON(b, repo, goldenCompareModel()) },
+		"workspace":    func(b *bytes.Buffer) error { return ReposJSON(b, workspace) },
+	} {
+		var buf bytes.Buffer
+		if err := write(&buf); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if bytes.Contains(buf.Bytes(), []byte(private)) || bytes.Contains(buf.Bytes(), []byte("token")) {
+			t.Errorf("%s JSON leaks a private path or credential", name)
+		}
+		checkGolden(t, "json/"+name+".golden.json", buf.Bytes())
+	}
+}
+
+func TestJSONRemote(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://u:p@github.com/a/b.git": "https://github.com/a/b.git",
+		"git@github.com:a/b.git":         "git@github.com:a/b.git",
+		"ssh://git@host/a/b":             "ssh://host/a/b",
+		"/home/me/repos/b":               "<nil>",
+		"file:///home/me/b":              "<nil>",
+		"../b":                           "<nil>",
+		`C:\repos\b`:                     "<nil>",
+		"":                               "<nil>",
+	} {
+		got := "<nil>"
+		if p := jsonRemote(in); p != nil {
+			got = *p
+		}
+		if got != want {
+			t.Errorf("jsonRemote(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestGoldenCompare(t *testing.T) {
