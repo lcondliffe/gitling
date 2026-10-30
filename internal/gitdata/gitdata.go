@@ -665,16 +665,45 @@ func (s Scope) String() string {
 // which subdirectory gitling runs in.
 func (s Scope) pathspecs() []string {
 	var specs []string
+	include := false
 	for _, p := range s.Paths {
-		specs = append(specs, ":(top)"+p)
-	}
-	if len(specs) == 0 && len(s.ExcludePaths) > 0 {
-		specs = append(specs, ":/") // excludes alone would imply ".", the cwd
+		spec := anchor(p, false)
+		include = include || !strings.Contains(spec, "exclude")
+		specs = append(specs, spec)
 	}
 	for _, p := range s.ExcludePaths {
-		specs = append(specs, ":(top,exclude)"+p)
+		specs = append(specs, anchor(p, true))
+	}
+	if !include && len(specs) > 0 {
+		specs = append(specs, ":/") // excludes alone would imply ".", the cwd
 	}
 	return specs
+}
+
+// anchor adds top (and exclude) magic to a pathspec, merging it into any
+// long-form ":(a,b)" or short-form ":!/^" magic the user already wrote.
+func anchor(p string, exclude bool) string {
+	var magic []string
+	rest := p
+	if long, ok := strings.CutPrefix(p, ":("); ok {
+		if i := strings.IndexByte(long, ')'); i >= 0 {
+			magic, rest = strings.FieldsFunc(long[:i], func(r rune) bool { return r == ',' }), long[i+1:]
+		}
+	} else if short, ok := strings.CutPrefix(p, ":"); ok {
+		i := 0
+		for i < len(short) && strings.IndexByte("/!^", short[i]) >= 0 {
+			exclude = exclude || short[i] != '/'
+			i++
+		}
+		rest = strings.TrimPrefix(short[i:], ":")
+	}
+	if !slices.Contains(magic, "top") {
+		magic = append(magic, "top")
+	}
+	if exclude && !slices.Contains(magic, "exclude") {
+		magic = append(magic, "exclude")
+	}
+	return ":(" + strings.Join(magic, ",") + ")" + rest
 }
 
 func (s Scope) excludesAuthor(c Commit) bool {
