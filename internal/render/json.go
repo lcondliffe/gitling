@@ -42,6 +42,9 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 		OpenPRs:  jsonPRs(m.PRs.Items),
 		Forge:    jsonForgeOf(m.PRs),
 	}
+	if !m.Scope.IsZero() {
+		out.Scope = &m.Scope
+	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -51,6 +54,7 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 type jsonModel struct {
 	Range        string            `json:"range"`
 	GeneratedAt  string            `json:"generated_at"`
+	Scope        *gitdata.Scope    `json:"scope,omitempty"` // absent when unscoped
 	Vitals       jsonVitals        `json:"vitals"`
 	Activity     jsonActivity      `json:"activity"`
 	Contributors []jsonContributor `json:"contributors"`

@@ -42,6 +42,7 @@ type Model struct {
 	Height    int  // terminal rows; 0 disables automatic height constraints
 	Shallow   bool // only locally available history is represented
 	DateBasis aggregate.DateBasis
+	Scope     gitdata.Scope // filters applied to history; see JSON
 	// Layout selects auto, wide, stack or compact. The empty string means auto.
 	Layout string
 }

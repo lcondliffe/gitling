@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -632,21 +633,83 @@ func (r *Repo) DeleteBranch(name string, force bool) error {
 	return err
 }
 
+// Scope narrows history collection. Paths are pathspecs relative to the repo
+// root; ExcludeAuthors match a mailmap-resolved name or email exactly
+// (case-insensitive). Nothing is inferred: the zero Scope is all history.
+type Scope struct {
+	Paths          []string `json:"paths,omitempty"`
+	ExcludePaths   []string `json:"exclude_paths,omitempty"`
+	ExcludeAuthors []string `json:"exclude_authors,omitempty"`
+}
+
+// IsZero reports whether the scope filters nothing.
+func (s Scope) IsZero() bool {
+	return len(s.Paths) == 0 && len(s.ExcludePaths) == 0 && len(s.ExcludeAuthors) == 0
+}
+
+// String describes the scope for humans, e.g. "paths: api · excluding: *.lock".
+func (s Scope) String() string {
+	var parts []string
+	for _, f := range []struct {
+		label string
+		vals  []string
+	}{{"paths", s.Paths}, {"excluding", s.ExcludePaths}, {"excluding authors", s.ExcludeAuthors}} {
+		if len(f.vals) > 0 {
+			parts = append(parts, f.label+": "+strings.Join(f.vals, ", "))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// pathspecs anchors every path at the repo root, so results don't depend on
+// which subdirectory gitling runs in.
+func (s Scope) pathspecs() []string {
+	var specs []string
+	for _, p := range s.Paths {
+		specs = append(specs, ":(top)"+p)
+	}
+	if len(specs) == 0 && len(s.ExcludePaths) > 0 {
+		specs = append(specs, ":/") // excludes alone would imply ".", the cwd
+	}
+	for _, p := range s.ExcludePaths {
+		specs = append(specs, ":(top,exclude)"+p)
+	}
+	return specs
+}
+
+func (s Scope) excludesAuthor(c Commit) bool {
+	for _, a := range s.ExcludeAuthors {
+		if strings.EqualFold(a, c.AuthorName) || strings.EqualFold(a, c.AuthorEmail) {
+			return true
+		}
+	}
+	return false
+}
+
 // Commits returns non-merge commits in revRange (e.g. "abc123..HEAD"), or the
-// entire history when revRange is empty. Results carry numstat-derived file
-// lists and insertion/deletion totals.
-func (r *Repo) Commits(revRange string) ([]Commit, error) {
+// entire history when revRange is empty, narrowed to scope. Results carry
+// numstat-derived file lists and insertion/deletion totals.
+func (r *Repo) Commits(revRange string, scope Scope) ([]Commit, error) {
 	// %aN/%aE are mailmap-resolved, so a .mailmap collapses split identities.
 	format := "%x1e%H%x1f%aN%x1f%aE%x1f%at%x1f%ct"
 	args := []string{"log", "--no-merges", "--numstat", "--pretty=format:" + format}
+	specs := scope.pathspecs()
+	if len(specs) > 0 {
+		// Path simplification would otherwise drop side-branch commits.
+		args = append(args, "--full-history")
+	}
 	if revRange != "" {
 		args = append(args, revRange)
 	}
-	out, err := r.run(args...)
+	out, err := r.run(append(append(args, "--"), specs...)...)
 	if err != nil {
 		return nil, err
 	}
-	return parseLog(out), nil
+	commits := parseLog(out)
+	if len(scope.ExcludeAuthors) > 0 {
+		commits = slices.DeleteFunc(commits, scope.excludesAuthor)
+	}
+	return commits, nil
 }
 
 func parseLog(out string) []Commit {
