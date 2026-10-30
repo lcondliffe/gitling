@@ -121,14 +121,16 @@ approximate semantics.
 
 ## Open PRs
 
-The dashboard shows a panel of open pull requests when it can get them, and
-hides it entirely when it can't or when there are none. It never talks to a
-forge API itself: it shells out to the platform's own CLI, so authentication is
-whatever that CLI already has. Today that means GitHub via
-[`gh`](https://cli.github.com); other platforms (GitLab's `glab`, Azure DevOps'
-`az repos`) are one entry in `internal/forge`. With no CLI installed, no
-network, or a remote gitling doesn't recognise, the panel just doesn't appear —
-`--prs=false` skips the lookup altogether.
+The dashboard shows a panel of open pull requests for GitHub and GitLab
+remotes. It never talks to a forge API itself: it shells out to the platform's
+own CLI ([`gh`](https://cli.github.com) or
+[`glab`](https://gitlab.com/gitlab-org/cli)), so authentication is whatever
+that CLI already has. The panel says "none open" when there are none, and names
+the reason when it couldn't ask: CLI not installed, not logged in, timed out,
+or query failed. A capped list says it is truncated. A remote gitling doesn't
+recognise shows no panel, and `--prs=false` skips the lookup altogether. In
+`--json`, `forge` carries the CLI, `status`, `truncated` and `checked_at`
+behind `open_prs`.
 
 ## Many repos
 

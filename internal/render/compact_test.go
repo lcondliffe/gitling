@@ -82,7 +82,7 @@ func TestTerminalHeightPipeStable(t *testing.T) {
 func TestCompactOpenWorkBeforeHistory(t *testing.T) {
 	m := goldenModel()
 	m.Width, m.Height, m.Layout = 80, 12, LayoutCompact
-	m.PRs = []forge.PR{{Number: 42, Title: "resolve release blocker", Author: "Ada", Updated: goldenNow}}
+	m.PRs = forge.Result{Status: forge.OK, Items: []forge.PR{{Number: 42, Title: "resolve release blocker", Author: "Ada", Updated: goldenNow}}}
 	var b bytes.Buffer
 	Dashboard(&b, m, true)
 	out := b.String()

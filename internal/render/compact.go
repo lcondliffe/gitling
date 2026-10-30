@@ -35,8 +35,8 @@ func (p palette) dashboardCompact(m Model) []string {
 	}
 	panels := []panel{}
 	// Open work is ahead of historical activity. No PR row is silently dropped.
-	if len(m.PRs) > 0 {
-		panels = append(panels, panel{prTitle(m), p.prLines(m, inner)})
+	if prs := p.prLines(m, inner); len(prs) > 0 {
+		panels = append(panels, panel{prTitle(m), prs})
 	}
 	activity := fmt.Sprintf("%d commits requested · streak %dd; chart collapsed", m.TotalCommits, m.Streak)
 	if len(m.Days) > 0 {

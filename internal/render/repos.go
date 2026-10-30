@@ -7,21 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
 // RepoRow is one checkout's line in the multi-repo overview. Vitals carries
 // only the Status() subset: branch, tracking, working-tree state, operation,
-// and last fetch. PRs is the open pull request count; zero renders blank, so
-// "none" and "couldn't ask" look the same, exactly like the dashboard's PR
-// panel.
+// and last fetch. PRs is the forge lookup: a count when there are some, the
+// reason when it failed, blank when none are open or there was nothing to ask.
 type RepoRow struct {
 	Name   string
 	Vitals gitdata.Vitals
-	PRs    int
-	// MorePRs marks a count that hit the lookup cap: the repo has at least
-	// PRs open, not exactly PRs.
-	MorePRs bool
+	PRs    forge.Result
 	// FetchFailed marks a --fetch that didn't complete.
 	FetchFailed bool
 	// Err is why the checkout couldn't be probed; shown instead of its state.
@@ -162,12 +159,15 @@ func Repos(w io.Writer, m ReposModel, color bool) {
 				line += "   " + c.colored + strings.Repeat(" ", widths[j]-cellLen(c.plain))
 			}
 		}
-		if r.PRs > 0 {
-			count := strconv.Itoa(r.PRs)
-			if r.MorePRs {
+		switch n := len(r.PRs.Items); {
+		case n > 0:
+			count := strconv.Itoa(n)
+			if r.PRs.Truncated {
 				count += "+"
 			}
-			line += fmt.Sprintf("   %s", p.c(cLabel, count+" "+plural(r.PRs, "PR", "PRs")))
+			line += "   " + p.c(cLabel, count+" "+plural(n, "PR", "PRs"))
+		case r.PRs.Status != "" && r.PRs.Status != forge.OK && r.PRs.Status != forge.Unsupported:
+			line += "   " + p.c(cAmber, r.PRs.Note())
 		}
 		fmt.Fprintln(w, "  "+strings.TrimRight(line, " "))
 	}

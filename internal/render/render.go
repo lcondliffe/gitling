@@ -34,9 +34,9 @@ type Model struct {
 	Growth       aggregate.Growth
 	HotFiles     []aggregate.FileChurn
 	Recent       []gitdata.RecentCommit
-	// PRs are the open pull requests on the forge hosting this repo; empty when
-	// there is no forge, no forge CLI, or nothing open — the panel is dropped.
-	PRs       []forge.PR
+	// PRs is the forge lookup for this repo; the zero value (lookup off) and an
+	// unsupported host drop the panel.
+	PRs       forge.Result
 	Now       time.Time
 	Width     int
 	Height    int  // terminal rows; 0 disables automatic height constraints
@@ -294,7 +294,14 @@ func titleWith(label, suffix string) string {
 }
 
 func prTitle(m Model) string {
-	return titleWith("Open PRs", strconv.Itoa(len(m.PRs)))
+	if m.PRs.Status != forge.OK {
+		return titleWith("Open PRs", "unavailable")
+	}
+	n := strconv.Itoa(len(m.PRs.Items))
+	if m.PRs.Truncated {
+		n += "+"
+	}
+	return titleWith("Open PRs", n)
 }
 
 func recentTitle(m Model) string {
@@ -324,11 +331,22 @@ func (p palette) hotFileLines(m Model, width int) []string {
 	return capture(func(w io.Writer) { p.hotFiles(w, m.HotFiles, width) })
 }
 
+// prLines is nil (panel dropped) when no lookup ran or the remote isn't a
+// forge; every other state says what happened.
 func (p palette) prLines(m Model, width int) []string {
-	if len(m.PRs) == 0 {
+	switch r := m.PRs; {
+	case r.Status == "" || r.Status == forge.Unsupported:
 		return nil
+	case r.Status != forge.OK:
+		return []string{"  " + p.c(cAmber, r.Note())}
+	case len(r.Items) == 0:
+		return []string{"  " + p.c(cLabel, "none open")}
 	}
-	return capture(func(w io.Writer) { p.prs(w, m.PRs, m.Now, width) })
+	lines := capture(func(w io.Writer) { p.prs(w, m.PRs.Items, m.Now, width) })
+	if m.PRs.Truncated {
+		lines = append(lines, "  "+p.c(cLabel, fmt.Sprintf("showing %d; more open", len(m.PRs.Items))))
+	}
+	return lines
 }
 
 func (p palette) recentLines(m Model, width int) []string {
@@ -1039,8 +1057,7 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 // Same shape as recent, and the same trade-off: the title is the flexible
 // column and is truncated rather than wrapped so a PR stays on one line.
 //
-// prs must be non-empty; the caller drops the whole panel when there is
-// nothing open.
+// prs must be non-empty; prLines handles the other states.
 func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	numW, authorW, agoW, titleW := 0, 0, 0, 0
 	for _, pr := range prs {

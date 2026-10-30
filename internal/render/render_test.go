@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -636,7 +637,7 @@ func TestDashboardHidesEmptyOptionalPanels(t *testing.T) {
 		m.Width = width
 		m.Recent = nil
 		m.HotFiles = nil
-		m.PRs = nil
+		m.PRs = forge.Result{}
 
 		var buf bytes.Buffer
 		Dashboard(&buf, m, false)
@@ -664,10 +665,10 @@ func TestOpenPRsPanel(t *testing.T) {
 	var buf bytes.Buffer
 	Dashboard(&buf, Model{
 		Now: now,
-		PRs: []forge.PR{
+		PRs: forge.Result{Status: forge.OK, Items: []forge.PR{
 			{Number: 42, Title: "feat: add the widget", Author: "ada", Updated: now.Add(-2 * time.Hour)},
 			{Number: 7, Title: "wip", Author: "alan", Draft: true, Updated: now.Add(-3 * 24 * time.Hour)},
-		},
+		}},
 	}, false)
 	out := buf.String()
 
@@ -679,6 +680,92 @@ func TestOpenPRsPanel(t *testing.T) {
 	}
 	if !strings.Contains(out, "#7   draft: wip") {
 		t.Errorf("draft should be marked in the title:\n%s", out)
+	}
+}
+
+// Each forge state renders its own way, in every layout.
+func TestOpenPRsPanelStates(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	one := []forge.PR{{Number: 42, Title: "feat: add the widget", Author: "ada", Updated: now}}
+	for _, tc := range []struct {
+		name string
+		res  forge.Result
+		want []string // nil == panel absent
+	}{
+		{"off", forge.Result{}, nil},
+		{"unsupported", forge.Result{Status: forge.Unsupported}, nil},
+		{"empty", forge.Result{CLI: "gh", Status: forge.OK}, []string{"OPEN PRS · 0", "none open"}},
+		{"truncated", forge.Result{CLI: "gh", Status: forge.OK, Items: one, Truncated: true}, []string{"OPEN PRS · 1+", "#42", "showing 1; more open"}},
+		{"missing", forge.Result{CLI: "gh", Status: forge.MissingCLI}, []string{"OPEN PRS · unavailable", "gh not installed"}},
+		{"unauthenticated", forge.Result{CLI: "glab", Status: forge.Unauthenticated}, []string{"glab not logged in"}},
+		{"timeout", forge.Result{CLI: "gh", Status: forge.Timeout}, []string{"gh timed out"}},
+		{"failed", forge.Result{CLI: "gh", Status: forge.Failed}, []string{"gh query failed"}},
+	} {
+		for _, layout := range []string{"wide", "stack", "compact"} {
+			var buf bytes.Buffer
+			Dashboard(&buf, Model{Now: now, Width: 100, Layout: layout, PRs: tc.res}, false)
+			out := buf.String()
+			if tc.want == nil && strings.Contains(out, "OPEN PRS") {
+				t.Errorf("%s/%s: panel should be absent:\n%s", tc.name, layout, out)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("%s/%s: missing %q:\n%s", tc.name, layout, w, out)
+				}
+			}
+		}
+	}
+}
+
+// The overview shows a count or a failure reason; an empty result stays blank.
+func TestReposPRColumn(t *testing.T) {
+	var buf bytes.Buffer
+	Repos(&buf, ReposModel{Rows: []RepoRow{
+		{Name: "many", PRs: forge.Result{Status: forge.OK, Items: []forge.PR{{Number: 1}}, Truncated: true}},
+		{Name: "loggedout", PRs: forge.Result{CLI: "gh", Status: forge.Unauthenticated}},
+		{Name: "quiet", PRs: forge.Result{CLI: "gh", Status: forge.OK}},
+	}}, false)
+	out := buf.String()
+	for _, want := range []string{"1+ PR", "gh not logged in"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "quiet") && strings.Contains(line, "PR") {
+			t.Errorf("empty result should render blank: %q", line)
+		}
+	}
+}
+
+func TestJSONForgeMetadata(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	decode := func(r forge.Result) map[string]any {
+		var buf bytes.Buffer
+		if err := JSON(&buf, Model{Now: now, PRs: r}, "day", nil); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	if got := decode(forge.Result{}); got["forge"] != nil {
+		t.Errorf("forge = %#v, want null when the lookup is off", got["forge"])
+	}
+	got := decode(forge.Result{CLI: "glab", Status: forge.OK, Truncated: true, CheckedAt: now,
+		Items: []forge.PR{{Number: 7, Title: "t", Author: "ada", Updated: now}}})
+	want := map[string]any{"cli": "glab", "status": "ok", "truncated": true, "checked_at": "2024-06-10T12:00:00Z"}
+	if !reflect.DeepEqual(got["forge"], want) {
+		t.Errorf("forge = %#v, want %#v", got["forge"], want)
+	}
+	if prs := got["open_prs"].([]any); len(prs) != 1 {
+		t.Errorf("open_prs = %#v, want one item", prs)
+	}
+	if got := decode(forge.Result{CLI: "gh", Status: forge.Unauthenticated, CheckedAt: now}); got["forge"].(map[string]any)["status"] != "unauthenticated" {
+		t.Errorf("forge = %#v, want unauthenticated", got["forge"])
 	}
 }
 
