@@ -78,7 +78,7 @@ func TestParseRemote(t *testing.T) {
 		"https://git.corp.example/group/sub/thing.git/":   {"git.corp.example", "group/sub/thing"},
 		"/srv/git/thing.git":                              {"", ""},
 	} {
-		if host, path := parseRemote(remote); host != want[0] || path != want[1] {
+		if host, _, path := parseRemote(remote); host != want[0] || path != want[1] {
 			t.Errorf("parseRemote(%q) = %q, %q, want %q, %q", remote, host, path, want[0], want[1])
 		}
 	}
@@ -96,6 +96,8 @@ func TestGLabGetsExplicitProject(t *testing.T) {
 		"git@gitlab.com:group/sub/thing.git":               "--repo https://gitlab.com/group/sub/thing ",
 		"https://gitlab.com/me/forked-thing.git":           "--repo https://gitlab.com/me/forked-thing ",
 		"ssh://git@git.corp.example:2222/team/app/svc.git": "--repo https://git.corp.example/team/app/svc ",
+		"https://git.corp.example:8443/group/project.git":  "--repo https://git.corp.example:8443/group/project ",
+		"http://git.corp.example/group/project.git":        "--repo http://git.corp.example/group/project ",
 	} {
 		args := filepath.Join(t.TempDir(), "args")
 		stub(t, "glab", `echo "$@" > `+args+`; echo '[]'`)

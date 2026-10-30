@@ -99,12 +99,12 @@ func AddHost(host, kind string) error {
 // a timeout or bad output becomes a Status rather than an error.
 func List(dir, remoteURL string, limit int) Result {
 	res := Result{Status: Unsupported, CheckedAt: time.Now()}
-	host, path := parseRemote(remoteURL)
+	host, web, path := parseRemote(remoteURL)
 	if f, ok := kinds[hosts[host]]; ok && path != "" {
 		res.CLI = f.cli
 		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 		defer cancel()
-		argv := f.argv("https://"+host+"/"+path, limit+1) // one extra reveals truncation
+		argv := f.argv(web+"/"+path, limit+1) // one extra reveals truncation
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		cmd.Dir = dir
 		out, err := cmd.Output()
@@ -149,16 +149,17 @@ func isAuthError(exit *exec.ExitError) bool {
 		strings.Contains(msg, "not logged in") || strings.Contains(msg, "401")
 }
 
-// parseRemote splits a git remote into hostname and project path (no .git),
-// from a URL (https://host/p, ssh://git@host:22/p) or SCP shorthand
+// parseRemote splits a git remote into hostname, web base URL and project path
+// (no .git), from a URL (https://host/p, ssh://git@host:22/p) or SCP shorthand
 // (git@host:p). Matching is on the host itself, so notgithub.com isn't github.com.
-func parseRemote(remote string) (host, path string) {
+// An HTTP(S) remote keeps its scheme and port in web; SSH ones get https://host.
+func parseRemote(remote string) (host, web, path string) {
 	remote = strings.TrimSpace(remote)
 	if !strings.Contains(remote, "://") {
 		// SCP shorthand: everything before the first colon, minus any user@.
 		var ok bool
 		if host, path, ok = strings.Cut(remote, ":"); !ok {
-			return "", ""
+			return "", "", ""
 		}
 		if _, after, ok := strings.Cut(host, "@"); ok {
 			host = after
@@ -166,11 +167,18 @@ func parseRemote(remote string) (host, path string) {
 	} else {
 		u, err := url.Parse(remote)
 		if err != nil {
-			return "", ""
+			return "", "", ""
 		}
 		host, path = u.Hostname(), u.Path
+		if u.Scheme == "http" || u.Scheme == "https" {
+			web = u.Scheme + "://" + strings.ToLower(u.Host)
+		}
 	}
-	return strings.ToLower(host), strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	host = strings.ToLower(host)
+	if web == "" {
+		web = "https://" + host
+	}
+	return host, web, strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 }
 
 // gh resolves the repo itself, as it always has.

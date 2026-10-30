@@ -196,7 +196,8 @@ host to its forge with `forge_hosts` in the config file:
 ```
 
 `glab` must already be logged in to that host (`glab auth login --hostname
-gitlab.example.com`).
+gitlab.example.com`). It needs a recent `glab` with `mr list --output json`
+(tested with 1.126; distro builds such as 1.36 lack it).
 
 ## Many repos
 
