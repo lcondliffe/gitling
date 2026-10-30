@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/lcondliffe/gitling/internal/aggregate"
@@ -49,19 +52,25 @@ func header(view string, repo *Repository, now time.Time) jsonHeader {
 	return h
 }
 
-// jsonRemote drops credentials from a URL remote and hides local-path remotes,
-// which would leak private filesystem paths.
+// scpRemote is git's [user@]host:path form; a one-letter host would be a drive.
+var scpRemote = regexp.MustCompile(`^(?:[^@/:]+@)?([^@/:\\]{2,}):([^:\\]+)$`)
+
+// jsonRemote returns host and path only; anything it can't recognise as a
+// network remote is null, so local paths and credentials never leak.
 func jsonRemote(s string) *string {
-	u, err := url.Parse(s)
-	switch {
-	case err == nil && u.Host != "" && u.Scheme != "file":
-		u.User = nil
-		s = u.String()
-	case err == nil:
-		return nil // empty, a local path, or a file:// URL
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil || u.Host == "" || !slices.Contains([]string{"https", "http", "ssh", "git"}, u.Scheme) {
+			return nil
+		}
+		s = u.Scheme + "://" + u.Host + u.EscapedPath()
+		return &s
 	}
-	// Otherwise scp-like (git@host:path), which can't carry a password.
-	return &s
+	if m := scpRemote.FindStringSubmatch(s); m != nil && !strings.HasPrefix(m[2], "/") {
+		s = m[1] + ":" + m[2]
+		return &s
+	}
+	return nil
 }
 
 func encode(w io.Writer, v any) error {

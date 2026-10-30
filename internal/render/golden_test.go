@@ -358,14 +358,22 @@ func TestGoldenJSON(t *testing.T) {
 
 func TestJSONRemote(t *testing.T) {
 	for in, want := range map[string]string{
-		"https://u:p@github.com/a/b.git": "https://github.com/a/b.git",
-		"git@github.com:a/b.git":         "git@github.com:a/b.git",
-		"ssh://git@host/a/b":             "ssh://host/a/b",
-		"/home/me/repos/b":               "<nil>",
-		"file:///home/me/b":              "<nil>",
-		"../b":                           "<nil>",
-		`C:\repos\b`:                     "<nil>",
-		"":                               "<nil>",
+		"https://u:p@github.com/a/b.git":              "https://github.com/a/b.git",
+		"git@github.com:a/b.git":                      "github.com:a/b.git",
+		"github.com:a/b.git":                          "github.com:a/b.git",
+		"ssh://git@host:2222/a/b":                     "ssh://host:2222/a/b",
+		"https://github.com/a/b.git?access_token=s#x": "https://github.com/a/b.git",
+		"https://u:synthetic%ZZsecret@github.com/a/b": "<nil>",
+		"/private/secret%zz/repo":                     "<nil>",
+		"/home/me/repos/b":                            "<nil>",
+		"file:///home/me/b":                           "<nil>",
+		"weird://host/a":                              "<nil>",
+		"host:/abs/path":                              "<nil>",
+		"../b":                                        "<nil>",
+		"./a:b":                                       "<nil>",
+		`C:\repos\b`:                                  "<nil>",
+		"C:/repos/b":                                  "<nil>",
+		"":                                            "<nil>",
 	} {
 		got := "<nil>"
 		if p := jsonRemote(in); p != nil {

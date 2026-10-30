@@ -143,8 +143,9 @@ starts with:
   `compare`, or `workspace` (the multi-repo overview).
 - `generated_at`: RFC 3339 timestamp.
 - `repository`: `{name, remote}`. `name` is the repository's directory name,
-  the same from any of its worktrees. `remote` is origin's URL with any
-  credentials removed, or `null` when there is no origin or it is a local path.
+  the same from any of its worktrees. `remote` is origin's host and path
+  only (no user, credentials or query), or `null` when there is no origin or
+  it isn't a recognisable network remote (a local path, say).
   `repository` itself is `null` for `workspace`.
 
 History views (`dashboard`, `graph`, `churn`, `contributors`) add
