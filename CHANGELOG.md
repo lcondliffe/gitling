@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/lcondliffe/gitling/compare/v0.6.2...v0.7.0) (2026-10-30)
+
+
+### Features
+
+* add compare view summarizing what a branch changes ([#53](https://github.com/lcondliffe/gitling/issues/53)) ([7fdbdb9](https://github.com/lcondliffe/gitling/commit/7fdbdb9af6f20aa2b1ed4f8439e61522925cd98a))
+* add scoped activity filters for monorepos and automation ([#56](https://github.com/lcondliffe/gitling/issues/56)) ([d91d138](https://github.com/lcondliffe/gitling/commit/d91d138237bfe96c2473338b770b0f87a6581fbe))
+* attention-first workspace sorting and linked worktree discovery ([#54](https://github.com/lcondliffe/gitling/issues/54)) ([124478a](https://github.com/lcondliffe/gitling/commit/124478a5936769c03bcc55883ea64d862ad2e344))
+* GitLab merge request parity and self-managed hosts ([#60](https://github.com/lcondliffe/gitling/issues/60)) ([b071d65](https://github.com/lcondliffe/gitling/commit/b071d6500d6ae39489294abc77c0dd0dbdfcdbb9))
+* report honest forge status and truncation ([#57](https://github.com/lcondliffe/gitling/issues/57)) ([3e7da53](https://github.com/lcondliffe/gitling/commit/3e7da538bcb7e13ef680ea2758a4ca327daf55c9))
+* show review and CI state for PRs and MRs ([#61](https://github.com/lcondliffe/gitling/issues/61)) ([df48a2d](https://github.com/lcondliffe/gitling/commit/df48a2d032c8e4d82a22e298334547a3b904c1fb))
+* versioned JSON output for every view ([#58](https://github.com/lcondliffe/gitling/issues/58)) ([9ab2c8d](https://github.com/lcondliffe/gitling/commit/9ab2c8daff1f96f1314e22932fff45a1af066b92))
+
+
+### Bug Fixes
+
+* verify squash merges on the forge before tidy deletes gone branches ([#59](https://github.com/lcondliffe/gitling/issues/59)) ([f8893f9](https://github.com/lcondliffe/gitling/commit/f8893f930fe88dceb02e2b109290089fae3bc1d6))
+
 ## [0.6.2](https://github.com/lcondliffe/gitling/compare/v0.6.1...v0.6.2) (2026-09-10)
 
 
