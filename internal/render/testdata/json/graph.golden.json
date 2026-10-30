@@ -1,0 +1,357 @@
+{
+  "schema_version": 1,
+  "view": "graph",
+  "generated_at": "2024-06-15T12:00:00Z",
+  "repository": {
+    "name": "gitling",
+    "remote": "https://github.com/lcondliffe/gitling.git"
+  },
+  "scope": {
+    "range": "last 10 weeks",
+    "date_basis": "author"
+  },
+  "activity": {
+    "days": [
+      {
+        "date": "2024-04-07",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-08",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-09",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-10",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-11",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-12",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-13",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-14",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-15",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-16",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-17",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-18",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-19",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-20",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-21",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-22",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-23",
+        "commits": 2
+      },
+      {
+        "date": "2024-04-24",
+        "commits": 4
+      },
+      {
+        "date": "2024-04-25",
+        "commits": 8
+      },
+      {
+        "date": "2024-04-26",
+        "commits": 3
+      },
+      {
+        "date": "2024-04-27",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-28",
+        "commits": 0
+      },
+      {
+        "date": "2024-04-29",
+        "commits": 1
+      },
+      {
+        "date": "2024-04-30",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-01",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-02",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-03",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-04",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-05",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-06",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-07",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-08",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-09",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-10",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-11",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-12",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-13",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-14",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-15",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-16",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-17",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-18",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-19",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-20",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-21",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-22",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-23",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-24",
+        "commits": 3
+      },
+      {
+        "date": "2024-05-25",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-26",
+        "commits": 0
+      },
+      {
+        "date": "2024-05-27",
+        "commits": 1
+      },
+      {
+        "date": "2024-05-28",
+        "commits": 2
+      },
+      {
+        "date": "2024-05-29",
+        "commits": 4
+      },
+      {
+        "date": "2024-05-30",
+        "commits": 8
+      },
+      {
+        "date": "2024-05-31",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-01",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-02",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-03",
+        "commits": 1
+      },
+      {
+        "date": "2024-06-04",
+        "commits": 2
+      },
+      {
+        "date": "2024-06-05",
+        "commits": 4
+      },
+      {
+        "date": "2024-06-06",
+        "commits": 8
+      },
+      {
+        "date": "2024-06-07",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-08",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-09",
+        "commits": 0
+      },
+      {
+        "date": "2024-06-10",
+        "commits": 1
+      },
+      {
+        "date": "2024-06-11",
+        "commits": 2
+      },
+      {
+        "date": "2024-06-12",
+        "commits": 4
+      },
+      {
+        "date": "2024-06-13",
+        "commits": 8
+      },
+      {
+        "date": "2024-06-14",
+        "commits": 3
+      },
+      {
+        "date": "2024-06-15",
+        "commits": 0
+      }
+    ],
+    "total_commits": 180,
+    "streak_days": 3,
+    "bucket": "week",
+    "buckets": [
+      {
+        "start": "2024-04-01",
+        "end": "2024-04-07",
+        "commits": 0
+      },
+      {
+        "start": "2024-04-08",
+        "end": "2024-04-14",
+        "commits": 18
+      },
+      {
+        "start": "2024-04-15",
+        "end": "2024-04-21",
+        "commits": 18
+      },
+      {
+        "start": "2024-04-22",
+        "end": "2024-04-28",
+        "commits": 18
+      },
+      {
+        "start": "2024-04-29",
+        "end": "2024-05-05",
+        "commits": 18
+      },
+      {
+        "start": "2024-05-06",
+        "end": "2024-05-12",
+        "commits": 18
+      },
+      {
+        "start": "2024-05-13",
+        "end": "2024-05-19",
+        "commits": 18
+      },
+      {
+        "start": "2024-05-20",
+        "end": "2024-05-26",
+        "commits": 18
+      },
+      {
+        "start": "2024-05-27",
+        "end": "2024-06-02",
+        "commits": 18
+      },
+      {
+        "start": "2024-06-03",
+        "end": "2024-06-09",
+        "commits": 18
+      },
+      {
+        "start": "2024-06-10",
+        "end": "2024-06-16",
+        "commits": 18
+      }
+    ]
+  }
+}

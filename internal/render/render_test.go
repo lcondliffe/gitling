@@ -271,7 +271,7 @@ func TestJSONIncludesDashboardData(t *testing.T) {
 	buckets := []aggregate.PeriodCount{{Start: start, End: start, Count: 2}}
 
 	var buf bytes.Buffer
-	if err := JSON(&buf, model, "day", buckets); err != nil {
+	if err := JSON(&buf, Repository{}, model, "day", buckets); err != nil {
 		t.Fatalf("JSON returned error: %v", err)
 	}
 
@@ -359,7 +359,7 @@ func TestJSONVitalsStateFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := JSON(&buf, model, "day", nil); err != nil {
+	if err := JSON(&buf, Repository{}, model, "day", nil); err != nil {
 		t.Fatalf("JSON returned error: %v", err)
 	}
 	var got map[string]any
@@ -395,7 +395,7 @@ func TestJSONVitalsStateFields(t *testing.T) {
 // date or an empty operation object, so consumers can tell the cases apart.
 func TestJSONVitalsIdleStateIsNull(t *testing.T) {
 	var buf bytes.Buffer
-	if err := JSON(&buf, Model{Vitals: gitdata.Vitals{Branch: "main"}}, "day", nil); err != nil {
+	if err := JSON(&buf, Repository{}, Model{Vitals: gitdata.Vitals{Branch: "main"}}, "day", nil); err != nil {
 		t.Fatalf("JSON returned error: %v", err)
 	}
 	var got map[string]any
@@ -742,7 +742,7 @@ func TestJSONForgeMetadata(t *testing.T) {
 	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
 	decode := func(r forge.Result) map[string]any {
 		var buf bytes.Buffer
-		if err := JSON(&buf, Model{Now: now, PRs: r}, "day", nil); err != nil {
+		if err := JSON(&buf, Repository{}, Model{Now: now, PRs: r}, "day", nil); err != nil {
 			t.Fatal(err)
 		}
 		var got map[string]any

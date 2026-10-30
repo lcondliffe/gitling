@@ -73,7 +73,7 @@ gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --layout stack   # force one column; --layout wide forces two
 gitling --layout compact # prioritize current state in short panes
 gitling --prs=false      # skip the open pull requests panel
-gitling --json           # structured dashboard data for scripts/integrations
+gitling --json           # structured data for scripts/integrations (any view)
 gitling --path services/api --exclude '*.lock'  # scope history to part of a monorepo
 gitling --exclude-author 'renovate[bot]'        # leave an automation account out
 gitling --date commit    # bucket by commit date instead of author date
@@ -103,7 +103,8 @@ drops commits whose (mailmap-resolved) author name or email matches exactly,
 ignoring case; bots are never guessed. The scope applies to activity,
 contributors, churn and growth before anything is counted, so all of them
 agree. It does not apply to recent commits or live state. A scoped run prints
-its scope (and adds a `scope` object to `--json`) and skips the history cache.
+its scope (and adds its filters to the `--json` `scope` object) and skips the
+history cache.
 
 The heatmap prints the requested date interval, with year context, and a
 compact intensity ramp (zero through the requested interval's daily peak;
@@ -128,6 +129,48 @@ available. Narrow growth charts retain bucket endpoints, not sums of cumulative
 samples. Shallow clones get an explicit incomplete-history caveat. The existing
 JSON `growth.total_loc` field retains its compatibility name and the same
 approximate semantics.
+
+## JSON output
+
+`--json` works with every view: the dashboard, `graph`, `churn`,
+`contributors`, `branches`, `compare`, and the multi-repo overview. Stdout is
+exactly one JSON document; warnings and errors go to stderr. Every document
+starts with:
+
+- `schema_version`: `1`. New keys may be added without a bump; removing or
+  changing a key bumps it.
+- `view`: `dashboard`, `graph`, `churn`, `contributors`, `branches`,
+  `compare`, or `workspace` (the multi-repo overview).
+- `generated_at`: RFC 3339 timestamp.
+- `repository`: `{name, remote}`. `name` is the repository's directory name,
+  the same from any of its worktrees. `remote` is origin's host and path
+  only (no user, credentials or query), or `null` when there is no origin or
+  it isn't a recognisable network remote (a local path, say).
+  `repository` itself is `null` for `workspace`.
+
+History views (`dashboard`, `graph`, `churn`, `contributors`) add
+`scope: {range, date_basis}`, plus `paths`, `exclude_paths` and
+`exclude_authors` when `--path`, `--exclude` or `--exclude-author` (or config)
+filter history. The dashboard keeps its original keys, including `range`.
+
+Lists are complete unless noted. The dashboard's panels stay capped as on
+screen (use the drill-downs for full lists); `compare` lists every changed
+file but at most 10 commits, with `commit_count` and `commits_truncated`
+describing the rest; `workspace` reports rows `--only attention` left out as
+`hidden`.
+
+`null` means the value doesn't exist or can't be known (no upstream, never
+fetched, ahead/behind with nothing to compare against, line counts of a binary
+file, a `workspace` checkout's `status` when it couldn't be probed, with the
+reason in `error`). An empty array means there was nothing to list. Open PRs
+are only the real answer when `forge.status` is `ok`: the dashboard and each
+`workspace` checkout carry `forge: {cli, status, truncated, checked_at}`
+(`null` when the lookup was off). In `workspace`, `open_prs` is a count and
+`open_prs_capped` mirrors `forge.truncated`.
+
+Branches report `checked_out` rather than the worktree path, and `workspace`
+names checkouts as the table does: relative to the current directory or `~`,
+and absolute only for a `--worktrees` checkout outside both.
 
 ## Open PRs
 

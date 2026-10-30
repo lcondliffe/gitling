@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -85,7 +86,7 @@ func main() {
 	layout := flag.String("layout", "auto", "dashboard layout: auto, wide, stack, compact")
 	bucket := flag.String("bucket", "day", "activity graph bucket: day, week, month")
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
-	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON instead of the human dashboard")
+	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON for any view (see README)")
 	prs := flag.Bool("prs", true, "show open pull requests (needs the forge CLI, e.g. gh)")
 	fetchFlag := flag.Bool("fetch", false, "multi-repo overview: fetch each repo first for accurate ahead/behind")
 	sortFlag := flag.String("sort", "name", "multi-repo overview order: name, attention")
@@ -278,7 +279,7 @@ Flags:
   --layout <mode>  dashboard layout: auto, wide, stack, compact (default auto)
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
-  --json           emit machine-readable JSON instead of the human dashboard
+  --json           emit machine-readable JSON for any view (see README)
   --prs=false      skip the open pull requests panel (needs a forge CLI: gh)
   --fetch          multi-repo overview only: fetch each repo first, for
                     accurate ahead/behind counts
@@ -331,12 +332,6 @@ type options struct {
 }
 
 func run(stdout io.Writer, o options) error {
-	// JSON only covers the dashboard model. Say so rather than silently
-	// serving dashboard data to someone who asked for a drill-down.
-	if o.json && o.view != "dashboard" {
-		return fmt.Errorf("--json is only available for the dashboard view, not %s", o.view)
-	}
-
 	repo, err := gitdata.Open(".")
 	if err != nil {
 		// Not inside a repo — but a directory of repos gets the multi-repo
@@ -366,6 +361,10 @@ func run(stdout io.Writer, o options) error {
 	}
 
 	vitals := repo.Vitals()
+	var ident render.Repository
+	if o.json {
+		ident = repoIdentity(repo)
+	}
 
 	days, err := parseSinceDays(o.since)
 	if err != nil {
@@ -381,7 +380,11 @@ func run(stdout io.Writer, o options) error {
 		if err != nil {
 			return err
 		}
-		render.Branches(stdout, render.BranchesModel{Branches: branches, Now: now, Width: o.width}, o.color)
+		bm := render.BranchesModel{Branches: branches, Now: now, Width: o.width}
+		if o.json {
+			return render.BranchesJSON(stdout, ident, bm)
+		}
+		render.Branches(stdout, bm, o.color)
 		return nil
 	}
 	// Likewise live state, and deliberately kept out of the cached aggregate:
@@ -391,9 +394,13 @@ func run(stdout io.Writer, o options) error {
 		if err != nil {
 			return err
 		}
-		render.Compare(stdout, render.CompareModel{
+		cm := render.CompareModel{
 			Head: vitals.Branch, Compare: c, Shallow: repo.IsShallow(), Now: now, Width: o.width,
-		}, o.color)
+		}
+		if o.json {
+			return render.CompareJSON(stdout, ident, cm)
+		}
+		render.Compare(stdout, cm, o.color)
 		return nil
 	}
 
@@ -479,7 +486,8 @@ func run(stdout io.Writer, o options) error {
 	m.Streak = aggregate.Streak(m.Days)
 	buckets := aggregate.BucketCounts(m.Days, o.bucket)
 	if o.view == "graph" {
-		render.Graph(stdout, render.GraphModel{
+		gm := render.GraphModel{
+			Scope:        o.scope,
 			DateBasis:    o.dateBasis,
 			RangeLabel:   m.RangeLabel,
 			Bucket:       o.bucket,
@@ -489,25 +497,41 @@ func run(stdout io.Writer, o options) error {
 			Streak:       m.Streak,
 			Now:          now,
 			Width:        o.width,
-		}, o.color)
+		}
+		if o.json {
+			return render.GraphJSON(stdout, ident, gm)
+		}
+		render.Graph(stdout, gm, o.color)
 		return nil
 	}
 	if o.view == "churn" {
-		render.Churn(stdout, render.ChurnModel{
+		cm := render.ChurnModel{
+			Scope:      o.scope,
 			RangeLabel: m.RangeLabel,
+			DateBasis:  o.dateBasis,
 			Files:      agg.HotFiles(sinceTime, now, 0), // 0 == all files
 			Now:        now,
 			Width:      o.width,
-		}, o.color)
+		}
+		if o.json {
+			return render.ChurnJSON(stdout, ident, cm)
+		}
+		render.Churn(stdout, cm, o.color)
 		return nil
 	}
 	if o.view == "contributors" {
-		render.Contributors(stdout, render.ContributorsModel{
+		cm := render.ContributorsModel{
+			Scope:        o.scope,
 			RangeLabel:   m.RangeLabel,
+			DateBasis:    o.dateBasis,
 			Contributors: agg.TopContributors(sinceTime, now, 0), // 0 == all authors
 			Now:          now,
 			Width:        o.width,
-		}, o.color)
+		}
+		if o.json {
+			return render.ContributorsJSON(stdout, ident, cm)
+		}
+		render.Contributors(stdout, cm, o.color)
 		return nil
 	}
 
@@ -526,11 +550,24 @@ func run(stdout io.Writer, o options) error {
 	}
 	m.PRs = <-prs
 	if o.json {
-		return render.JSON(stdout, m, o.bucket, buckets)
+		return render.JSON(stdout, ident, m, o.bucket, buckets)
 	}
 
 	render.Dashboard(stdout, m, o.color)
 	return nil
+}
+
+// repoIdentity names the repo by its common dir, so every worktree reports the
+// same name and no checkout path is exposed.
+func repoIdentity(repo *gitdata.Repo) render.Repository {
+	id := render.Repository{Remote: repo.RemoteURL()}
+	if dir, err := repo.CommonDir(); err == nil {
+		if filepath.Base(dir) == ".git" {
+			dir = filepath.Dir(dir)
+		}
+		id.Name = strings.TrimSuffix(filepath.Base(dir), ".git")
+	}
+	return id
 }
 
 // selectView reduces the drill-down views named on the command line (as a

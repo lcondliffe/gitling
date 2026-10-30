@@ -49,6 +49,7 @@ type Model struct {
 
 // GraphModel is the focused activity drill-down view. Width: see Model.
 type GraphModel struct {
+	Scope        gitdata.Scope
 	DateBasis    aggregate.DateBasis
 	RangeLabel   string
 	Bucket       string
@@ -62,7 +63,9 @@ type GraphModel struct {
 
 // ChurnModel is the focused file-churn drill-down view. Width: see Model.
 type ChurnModel struct {
+	Scope      gitdata.Scope
 	RangeLabel string
+	DateBasis  aggregate.DateBasis
 	Files      []aggregate.FileChurn
 	Now        time.Time
 	Width      int
@@ -70,7 +73,9 @@ type ChurnModel struct {
 
 // ContributorsModel is the focused contributor drill-down view. Width: see Model.
 type ContributorsModel struct {
+	Scope        gitdata.Scope
 	RangeLabel   string
+	DateBasis    aggregate.DateBasis
 	Contributors []aggregate.Contributor
 	Now          time.Time
 	Width        int
