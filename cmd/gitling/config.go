@@ -31,6 +31,8 @@ type config struct {
 	// --exclude-author do; those flags add to these lists.
 	Exclude        []string `json:"exclude"`
 	ExcludeAuthors []string `json:"exclude_authors"`
+	// ForgeHosts maps extra remote hosts (self-managed) to "github" or "gitlab".
+	ForgeHosts map[string]string `json:"forge_hosts"`
 }
 
 // configPath resolves the config file location, in priority order:

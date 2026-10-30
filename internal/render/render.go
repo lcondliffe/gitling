@@ -299,15 +299,24 @@ func titleWith(label, suffix string) string {
 	return label + " · " + suffix
 }
 
+// prKind is the forge's own name and number prefix: GitLab has MRs, !123.
+func prKind(r forge.Result) (noun, sigil string) {
+	if r.CLI == "glab" {
+		return "MR", "!"
+	}
+	return "PR", "#"
+}
+
 func prTitle(m Model) string {
+	noun, _ := prKind(m.PRs)
 	if m.PRs.Status != forge.OK {
-		return titleWith("Open PRs", "unavailable")
+		return titleWith("Open "+noun+"s", "unavailable")
 	}
 	n := strconv.Itoa(len(m.PRs.Items))
 	if m.PRs.Truncated {
 		n += "+"
 	}
-	return titleWith("Open PRs", n)
+	return titleWith("Open "+noun+"s", n)
 }
 
 func recentTitle(m Model) string {
@@ -348,7 +357,8 @@ func (p palette) prLines(m Model, width int) []string {
 	case len(r.Items) == 0:
 		return []string{"  " + p.c(cLabel, "none open")}
 	}
-	lines := capture(func(w io.Writer) { p.prs(w, m.PRs.Items, m.Now, width) })
+	_, sigil := prKind(m.PRs)
+	lines := capture(func(w io.Writer) { p.prs(w, m.PRs.Items, sigil, m.Now, width) })
 	if m.PRs.Truncated {
 		lines = append(lines, "  "+p.c(cLabel, fmt.Sprintf("showing %d; more open", len(m.PRs.Items))))
 	}
@@ -1064,10 +1074,10 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 // column and is truncated rather than wrapped so a PR stays on one line.
 //
 // prs must be non-empty; prLines handles the other states.
-func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
+func (p palette) prs(w io.Writer, prs []forge.PR, sigil string, now time.Time, width int) {
 	numW, authorW, agoW, titleW := 0, 0, 0, 0
 	for _, pr := range prs {
-		if n := cellLen(prNumber(pr)); n > numW {
+		if n := cellLen(prNumber(pr, sigil)); n > numW {
 			numW = n
 		}
 		if n := cellLen(prTitleText(pr)); n > titleW {
@@ -1095,7 +1105,7 @@ func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 
 	for _, pr := range prs {
 		var b strings.Builder
-		num := prNumber(pr)
+		num := prNumber(pr, sigil)
 		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-cellLen(num)) + "  ")
 		title := truncate(prTitleText(pr), titleW)
 		b.WriteString(title + strings.Repeat(" ", titleW-cellLen(title)) + "  ")
@@ -1106,7 +1116,7 @@ func (p palette) prs(w io.Writer, prs []forge.PR, now time.Time, width int) {
 	}
 }
 
-func prNumber(pr forge.PR) string { return "#" + strconv.Itoa(pr.Number) }
+func prNumber(pr forge.PR, sigil string) string { return sigil + strconv.Itoa(pr.Number) }
 
 // prTitleText marks drafts inline rather than in a column of their own: most
 // lists have none, and an empty column costs every row.

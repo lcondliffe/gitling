@@ -1,6 +1,11 @@
 package forge
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseGHRequests(t *testing.T) {
 	got, err := parseGHRequests([]byte(`[
@@ -40,5 +45,26 @@ func TestParseGLRequests(t *testing.T) {
 func TestRequestsUnsupportedHost(t *testing.T) {
 	if _, err := Requests(t.TempDir(), "git@example.com:a/b.git", "x"); err == nil {
 		t.Error("want an error for an unsupported forge")
+	}
+}
+
+// A self-managed GitLab host is asked directly, for the remote's own project.
+func TestRequestsSelfManagedGitLab(t *testing.T) {
+	if err := AddHost("git.corp.example", "gitlab"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { delete(hosts, "git.corp.example") })
+	args := filepath.Join(t.TempDir(), "args")
+	stub(t, "glab", `echo "$@" > `+args+`; echo '[]'`)
+	if _, err := Requests(t.TempDir(), "https://git.corp.example:8443/group/app.git", "feat/x"); err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := os.ReadFile(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "api --hostname git.corp.example:8443 projects/group%2Fapp/merge_requests?state=all&per_page=50&source_branch=feat%2Fx"
+	if got := strings.TrimSpace(string(recorded)); got != want {
+		t.Errorf("argv %q, want %q", got, want)
 	}
 }

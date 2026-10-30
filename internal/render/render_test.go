@@ -697,7 +697,8 @@ func TestOpenPRsPanelStates(t *testing.T) {
 		{"empty", forge.Result{CLI: "gh", Status: forge.OK}, []string{"OPEN PRS · 0", "none open"}},
 		{"truncated", forge.Result{CLI: "gh", Status: forge.OK, Items: one, Truncated: true}, []string{"OPEN PRS · 1+", "#42", "showing 1; more open"}},
 		{"missing", forge.Result{CLI: "gh", Status: forge.MissingCLI}, []string{"OPEN PRS · unavailable", "gh not installed"}},
-		{"unauthenticated", forge.Result{CLI: "glab", Status: forge.Unauthenticated}, []string{"glab not logged in"}},
+		{"gitlab", forge.Result{CLI: "glab", Status: forge.OK, Items: one}, []string{"OPEN MRS · 1", "!42"}},
+		{"unauthenticated", forge.Result{CLI: "glab", Status: forge.Unauthenticated}, []string{"OPEN MRS · unavailable", "glab not logged in"}},
 		{"timeout", forge.Result{CLI: "gh", Status: forge.Timeout}, []string{"gh timed out"}},
 		{"failed", forge.Result{CLI: "gh", Status: forge.Failed}, []string{"gh query failed"}},
 	} {
@@ -724,9 +725,10 @@ func TestReposPRColumn(t *testing.T) {
 		{Name: "many", PRs: forge.Result{Status: forge.OK, Items: []forge.PR{{Number: 1}}, Truncated: true}},
 		{Name: "loggedout", PRs: forge.Result{CLI: "gh", Status: forge.Unauthenticated}},
 		{Name: "quiet", PRs: forge.Result{CLI: "gh", Status: forge.OK}},
+		{Name: "lab", PRs: forge.Result{CLI: "glab", Status: forge.OK, Items: []forge.PR{{Number: 1}, {Number: 2}}}},
 	}}, false)
 	out := buf.String()
-	for _, want := range []string{"1+ PR", "gh not logged in"} {
+	for _, want := range []string{"1+ PR", "gh not logged in", "2 MRs"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
 		}

@@ -185,6 +185,21 @@ recognise shows no panel, and `--prs=false` skips the lookup altogether. In
 `--json`, `forge` carries the CLI, `status`, `truncated` and `checked_at`
 behind `open_prs`.
 
+GitLab remotes show merge requests as `Open MRs` with `!123` numbers, and
+`glab` is always given the project explicitly (from `origin`), so nested
+groups, SSH remotes and checkouts with several remotes need no extra setup;
+tidy's forge verification asks the same host and project.
+github.com and gitlab.com are recognised out of the box; map a self-managed
+host to its forge with `forge_hosts` in the config file:
+
+```json
+{ "forge_hosts": { "gitlab.example.com": "gitlab" } }
+```
+
+`glab` must already be logged in to that host (`glab auth login --hostname
+gitlab.example.com`). It needs a recent `glab` with `mr list --output json`
+(tested with 1.126; distro builds such as 1.36 lack it).
+
 ## Many repos
 
 <img src="docs/screenshot-repos.png" alt="gitling repository overview: one line per repo, each with a status dot, name, current branch, ahead/behind counts, working-tree state, and open PR count" width="900">
@@ -304,7 +319,8 @@ stderr.
   "prs": true,
   "protect": ["release/*", "wip/keep-me"],
   "exclude": ["*.lock", "*package-lock.json"],
-  "exclude_authors": ["dependabot[bot]"]
+  "exclude_authors": ["dependabot[bot]"],
+  "forge_hosts": { "gitlab.example.com": "gitlab" }
 }
 ```
 

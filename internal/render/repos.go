@@ -165,7 +165,8 @@ func Repos(w io.Writer, m ReposModel, color bool) {
 			if r.PRs.Truncated {
 				count += "+"
 			}
-			line += "   " + p.c(cLabel, count+" "+plural(n, "PR", "PRs"))
+			noun, _ := prKind(r.PRs)
+			line += "   " + p.c(cLabel, count+" "+plural(n, noun, noun+"s"))
 		case r.PRs.Status != "" && r.PRs.Status != forge.OK && r.PRs.Status != forge.Unsupported:
 			line += "   " + p.c(cAmber, r.PRs.Note())
 		}
