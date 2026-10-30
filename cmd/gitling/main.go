@@ -142,6 +142,12 @@ func main() {
 	if !explicit["prs"] && cfg.PRs != nil {
 		*prs = *cfg.PRs
 	}
+	for host, kind := range cfg.ForgeHosts {
+		if err := forge.AddHost(host, kind); err != nil {
+			fmt.Fprintln(os.Stderr, "gitling:", err)
+			os.Exit(2)
+		}
+	}
 
 	if *graph {
 		requested = append(requested, "graph")

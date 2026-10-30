@@ -57,20 +57,64 @@ func TestParseGLab(t *testing.T) {
 	}
 }
 
-func TestRemoteHost(t *testing.T) {
-	for remote, want := range map[string]string{
-		"https://github.com/acme/thing.git":      "github.com",
-		"https://user:tok@github.com/acme/thing": "github.com",
-		"git@github.com:acme/thing.git":          "github.com",
-		"ssh://git@github.com:22/acme/thing.git": "github.com",
-		"git://GitHub.com/acme/thing.git":        "github.com",
-		"https://notgithub.com/acme/thing.git":   "notgithub.com",
-		"git@gitlab.example.com:acme/thing.git":  "gitlab.example.com",
-		"/srv/git/thing.git":                     "",
+func TestParseGLabLegacyWIP(t *testing.T) {
+	prs, err := parseGLab([]byte(`[{"iid":1,"work_in_progress":true}]`))
+	if err != nil || len(prs) != 1 || !prs[0].Draft {
+		t.Errorf("got %+v, %v; want one draft", prs, err)
+	}
+}
+
+func TestParseRemote(t *testing.T) {
+	for remote, want := range map[string][2]string{
+		"https://github.com/acme/thing.git":               {"github.com", "acme/thing"},
+		"https://user:tok@github.com/acme/thing":          {"github.com", "acme/thing"},
+		"git@github.com:acme/thing.git":                   {"github.com", "acme/thing"},
+		"ssh://git@github.com:22/acme/thing.git":          {"github.com", "acme/thing"},
+		"git://GitHub.com/acme/thing.git":                 {"github.com", "acme/thing"},
+		"https://notgithub.com/acme/thing.git":            {"notgithub.com", "acme/thing"},
+		"git@gitlab.example.com:acme/thing.git":           {"gitlab.example.com", "acme/thing"},
+		"git@gitlab.com:group/sub/deeper/thing.git":       {"gitlab.com", "group/sub/deeper/thing"},
+		"ssh://git@git.corp.example:2222/group/sub/thing": {"git.corp.example", "group/sub/thing"},
+		"https://git.corp.example/group/sub/thing.git/":   {"git.corp.example", "group/sub/thing"},
+		"/srv/git/thing.git":                              {"", ""},
 	} {
-		if got := remoteHost(remote); got != want {
-			t.Errorf("remoteHost(%q) = %q, want %q", remote, got, want)
+		if host, path := parseRemote(remote); host != want[0] || path != want[1] {
+			t.Errorf("parseRemote(%q) = %q, %q, want %q, %q", remote, host, path, want[0], want[1])
 		}
+	}
+}
+
+// glab is always told which project to query: nested namespaces and SSH
+// remotes become a web URL, a fork's own origin is used rather than glab's
+// guess, and a configured self-managed host works like gitlab.com.
+func TestGLabGetsExplicitProject(t *testing.T) {
+	if err := AddHost("Git.Corp.Example", "gitlab"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { delete(hosts, "git.corp.example") })
+	for remote, want := range map[string]string{
+		"git@gitlab.com:group/sub/thing.git":               "--repo https://gitlab.com/group/sub/thing ",
+		"https://gitlab.com/me/forked-thing.git":           "--repo https://gitlab.com/me/forked-thing ",
+		"ssh://git@git.corp.example:2222/team/app/svc.git": "--repo https://git.corp.example/team/app/svc ",
+	} {
+		args := filepath.Join(t.TempDir(), "args")
+		stub(t, "glab", `echo "$@" > `+args+`; echo '[]'`)
+		if res := List(t.TempDir(), remote, 5); res.CLI != "glab" || res.Status != OK {
+			t.Errorf("%s: got %+v", remote, res)
+		}
+		recorded, err := os.ReadFile(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(recorded), want) {
+			t.Errorf("%s: argv %q lacks %q", remote, recorded, want)
+		}
+	}
+}
+
+func TestAddHostRejectsUnknownKind(t *testing.T) {
+	if err := AddHost("git.example", "bitbucket"); err == nil {
+		t.Error("want an error for an unknown forge kind")
 	}
 }
 

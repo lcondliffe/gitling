@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os/exec"
 	"strconv"
@@ -67,17 +68,28 @@ func (r Result) Note() string {
 // for, not worth hanging on. A var so tests can shorten it.
 var listTimeout = 3 * time.Second
 
-// forges maps a host in the remote URL to the CLI that lists its open PRs.
-// Supporting another platform is one more entry: the host to match, the CLI,
-// its argv, and a decoder for its JSON.
-var forges = []struct {
-	host  string
+type adapter struct {
 	cli   string
-	argv  func(limit int) []string
+	argv  func(project string, limit int) []string
 	parse func([]byte) ([]PR, error)
-}{
-	{"github.com", "gh", ghArgv, parseGH},
-	{"gitlab.com", "glab", glabArgv, parseGLab},
+}
+
+// kinds are the supported forges, keyed by the name config uses for them.
+var kinds = map[string]adapter{
+	"github": {"gh", ghArgv, parseGH},
+	"gitlab": {"glab", glabArgv, parseGLab},
+}
+
+// hosts maps a remote's host to its forge kind; AddHost extends it.
+var hosts = map[string]string{"github.com": "github", "gitlab.com": "gitlab"}
+
+// AddHost maps host (e.g. a self-managed GitLab) to kind "github" or "gitlab".
+func AddHost(host, kind string) error {
+	if _, ok := kinds[kind]; !ok {
+		return fmt.Errorf("forge host %q: unknown kind %q (want github or gitlab)", host, kind)
+	}
+	hosts[strings.ToLower(host)] = kind
+	return nil
 }
 
 // List returns the open PRs for the repo in dir, whose origin remote is
@@ -87,15 +99,12 @@ var forges = []struct {
 // a timeout or bad output becomes a Status rather than an error.
 func List(dir, remoteURL string, limit int) Result {
 	res := Result{Status: Unsupported, CheckedAt: time.Now()}
-	host := remoteHost(remoteURL)
-	for _, f := range forges {
-		if host != f.host {
-			continue
-		}
+	host, path := parseRemote(remoteURL)
+	if f, ok := kinds[hosts[host]]; ok && path != "" {
 		res.CLI = f.cli
 		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 		defer cancel()
-		argv := f.argv(limit + 1) // one extra reveals truncation
+		argv := f.argv("https://"+host+"/"+path, limit+1) // one extra reveals truncation
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		cmd.Dir = dir
 		out, err := cmd.Output()
@@ -140,31 +149,32 @@ func isAuthError(exit *exec.ExitError) bool {
 		strings.Contains(msg, "not logged in") || strings.Contains(msg, "401")
 }
 
-// remoteHost pulls the hostname out of a git remote, which comes in two
-// shapes: a URL (https://host/p, ssh://git@host:22/p) and SCP shorthand
-// (git@host:p). Matching has to be on the host itself — a substring test
-// would take notgithub.com for github.com.
-func remoteHost(remote string) string {
+// parseRemote splits a git remote into hostname and project path (no .git),
+// from a URL (https://host/p, ssh://git@host:22/p) or SCP shorthand
+// (git@host:p). Matching is on the host itself, so notgithub.com isn't github.com.
+func parseRemote(remote string) (host, path string) {
 	remote = strings.TrimSpace(remote)
 	if !strings.Contains(remote, "://") {
 		// SCP shorthand: everything before the first colon, minus any user@.
-		host, _, ok := strings.Cut(remote, ":")
-		if !ok {
-			return ""
+		var ok bool
+		if host, path, ok = strings.Cut(remote, ":"); !ok {
+			return "", ""
 		}
 		if _, after, ok := strings.Cut(host, "@"); ok {
 			host = after
 		}
-		return strings.ToLower(host)
+	} else {
+		u, err := url.Parse(remote)
+		if err != nil {
+			return "", ""
+		}
+		host, path = u.Hostname(), u.Path
 	}
-	u, err := url.Parse(remote)
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(u.Hostname())
+	return strings.ToLower(host), strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 }
 
-func ghArgv(limit int) []string {
+// gh resolves the repo itself, as it always has.
+func ghArgv(_ string, limit int) []string {
 	return []string{
 		"gh", "pr", "list",
 		"--state", "open",
@@ -199,9 +209,10 @@ func parseGH(data []byte) ([]PR, error) {
 	return prs, nil
 }
 
-// glab mr list defaults to open MRs.
-func glabArgv(limit int) []string {
-	return []string{"glab", "mr", "list", "--per-page", strconv.Itoa(limit), "--output", "json"}
+// glab mr list defaults to open MRs. --repo pins the project so glab neither
+// guesses between remotes (forks) nor falls back to gitlab.com.
+func glabArgv(project string, limit int) []string {
+	return []string{"glab", "mr", "list", "--repo", project, "--per-page", strconv.Itoa(limit), "--output", "json"}
 }
 
 func parseGLab(data []byte) ([]PR, error) {
@@ -212,6 +223,7 @@ func parseGLab(data []byte) ([]PR, error) {
 			Username string `json:"username"`
 		} `json:"author"`
 		Draft     bool      `json:"draft"`
+		WIP       bool      `json:"work_in_progress"` // pre-draft GitLab
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -223,7 +235,7 @@ func parseGLab(data []byte) ([]PR, error) {
 			Number:  r.IID,
 			Title:   r.Title,
 			Author:  r.Author.Username,
-			Draft:   r.Draft,
+			Draft:   r.Draft || r.WIP,
 			Updated: r.UpdatedAt,
 		})
 	}
