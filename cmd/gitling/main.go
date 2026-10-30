@@ -372,8 +372,8 @@ func run(stdout io.Writer, o options) error {
 
 	// Open PRs come from the forge's CLI over the network, so the fetch runs
 	// alongside the history walk instead of in front of it. The channel is
-	// closed (yielding nil on receive) when the panel is off.
-	prs := make(chan []forge.PR, 1)
+	// closed (yielding the zero Result on receive) when the panel is off.
+	prs := make(chan forge.Result, 1)
 	if o.prs && o.view == "dashboard" {
 		remote := repo.RemoteURL() // resolved here: Repo isn't used concurrently
 		go func() { prs <- forge.List(".", remote, maxPRs) }()

@@ -147,7 +147,7 @@ func runRepos(stdout io.Writer, o options, names []string) error {
 func probeGroup(o options, cs []checkout) []render.RepoRow {
 	rows := make([]render.RepoRow, len(cs))
 	fetched, fetchErr := false, error(nil)
-	prs, prsDone := 0, false
+	prs, prsDone := forge.Result{}, false
 	for i, c := range cs {
 		rows[i].Name = displayName(c.path)
 		if c.err != nil {
@@ -172,9 +172,9 @@ func probeGroup(o options, cs []checkout) []render.RepoRow {
 		if o.prs {
 			if !prsDone {
 				prsDone = true
-				prs = len(forge.List(c.path, repo.RemoteURL(), overviewPRLimit))
+				prs = forge.List(c.path, repo.RemoteURL(), overviewPRLimit)
 			}
-			rows[i].PRs, rows[i].MorePRs = prs, prs == overviewPRLimit
+			rows[i].PRs = prs
 		}
 	}
 	return rows

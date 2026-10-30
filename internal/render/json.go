@@ -39,7 +39,8 @@ func JSON(w io.Writer, m Model, bucket string, buckets []aggregate.PeriodCount) 
 		},
 		HotFiles: jsonHotFiles(m.HotFiles),
 		Recent:   jsonRecents(m.Recent),
-		OpenPRs:  jsonPRs(m.PRs),
+		OpenPRs:  jsonPRs(m.PRs.Items),
+		Forge:    jsonForgeOf(m.PRs),
 	}
 
 	enc := json.NewEncoder(w)
@@ -57,10 +58,26 @@ type jsonModel struct {
 	HotFiles     []jsonHotFile     `json:"hot_files"`
 	Recent       []jsonRecent      `json:"recent"`
 	OpenPRs      []jsonPR          `json:"open_prs"`
+	Forge        *jsonForge        `json:"forge"`
 }
 
-// jsonPR is one open pull request on the forge; the list is empty when there
-// is no forge CLI to ask.
+// jsonForge says how open_prs was obtained; null when the lookup was off.
+// open_prs is only the real answer when status is "ok".
+type jsonForge struct {
+	CLI       string `json:"cli"`
+	Status    string `json:"status"`
+	Truncated bool   `json:"truncated"`
+	CheckedAt string `json:"checked_at"`
+}
+
+func jsonForgeOf(r forge.Result) *jsonForge {
+	if r.Status == "" {
+		return nil
+	}
+	return &jsonForge{CLI: r.CLI, Status: string(r.Status), Truncated: r.Truncated, CheckedAt: r.CheckedAt.Format(time.RFC3339)}
+}
+
+// jsonPR is one open pull request on the forge.
 type jsonPR struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
