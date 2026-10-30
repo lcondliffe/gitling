@@ -715,6 +715,11 @@ func (s Scope) excludesAuthor(c Commit) bool {
 	return false
 }
 
+// BranchTip returns the full hash a local branch points at right now.
+func (r *Repo) BranchTip(name string) (string, error) {
+	return r.resolveCommit("refs/heads/" + name)
+}
+
 // Commits returns non-merge commits in revRange (e.g. "abc123..HEAD"), or the
 // entire history when revRange is empty, narrowed to scope. Results carry
 // numstat-derived file lists and insertion/deletion totals.

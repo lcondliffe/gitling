@@ -16,7 +16,7 @@ import (
 	"github.com/lcondliffe/gitling/internal/gitdata"
 )
 
-// Reason is why a branch is a cleanup candidate. The three overlap in practice;
+// Reason is why a branch is a cleanup candidate. They overlap in practice;
 // Classify assigns each branch the safest single reason that applies.
 type Reason string
 
@@ -24,11 +24,19 @@ const (
 	// ReasonMerged: the tip is an ancestor of the default branch, so the work is
 	// verifiably in and `git branch -d` will accept the deletion.
 	ReasonMerged Reason = "merged"
-	// ReasonGone: the branch tracked a remote branch that no longer exists.
-	// This is the squash-merge shape — the commits landed under new hashes, so
-	// git sees the branch as unmerged and only -D will drop it. The forge
-	// deleting the remote branch on merge is the evidence that it is safe.
+	// ReasonVerified: the upstream is gone and the forge has a merged PR from
+	// this repo, at exactly this tip, into the base, whose merge commit is in
+	// the base. The squash-merge shape, proven rather than assumed.
+	ReasonVerified Reason = "verified"
+	// ReasonUnverified: the upstream is gone but the forge could not be asked,
+	// or its merged PR doesn't fully check out (base, merge commit).
+	ReasonUnverified Reason = "unverified"
+	// ReasonGone: the upstream is gone and the forge has no PR at this tip:
+	// deleted unmerged, pushed to after merge, or a reused branch name.
 	ReasonGone Reason = "gone"
+	// ReasonClosed: the upstream is gone and its PR at this tip was closed
+	// without merging.
+	ReasonClosed Reason = "closed"
 	// ReasonStale: no commit for longer than the threshold, and neither merged
 	// nor gone. This is the category where deleting can actually lose work, so
 	// it is never selected unless asked for explicitly.
@@ -45,8 +53,11 @@ type Options struct {
 	// "origin/main". Used for protection and for labelling the plan.
 	Base string
 	// Reasons selects the categories to consider. An empty set means the safe
-	// default: merged and gone.
+	// default: merged and verified.
 	Reasons map[Reason]bool
+	// Evidence is what the forge said about each gone branch, by branch name.
+	// A gone branch with no entry could not be verified.
+	Evidence map[string]Evidence
 	// StaleAfter overrides DefaultStaleAfter when non-zero.
 	StaleAfter time.Duration
 	// Protect holds additional filepath-style globs ("release/*") that are never
@@ -55,10 +66,30 @@ type Options struct {
 	Now     time.Time
 }
 
-// selects reports whether a reason is in play, defaulting to merged+gone.
+// Evidence is the forge's answer for one gone branch: every PR whose source
+// branch had the upstream's name.
+type Evidence struct {
+	Requests []Request
+}
+
+// Request is one pull/merge request as the forge reports it.
+type Request struct {
+	State     string // "merged", "closed" or "open"
+	HeadSHA   string
+	Base      string // target branch name
+	CrossRepo bool   // opened from a fork
+	// MergeCommitInBase: the merge/squash commit exists and is reachable from
+	// the base, so history was not rewritten after the merge.
+	MergeCommitInBase bool
+}
+
+// GoneReasons are the categories a gone upstream can land in.
+var GoneReasons = []Reason{ReasonVerified, ReasonUnverified, ReasonGone, ReasonClosed}
+
+// selects reports whether a reason is in play, defaulting to merged+verified.
 func (o Options) selects(r Reason) bool {
 	if len(o.Reasons) == 0 {
-		return r == ReasonMerged || r == ReasonGone
+		return r == ReasonMerged || r == ReasonVerified
 	}
 	return o.Reasons[r]
 }
@@ -114,7 +145,7 @@ func (p Plan) Forced() int {
 //
 // A branch gets at most one reason, chosen by how much evidence there is that
 // its work is safe: merged (provably in) beats gone (the remote was deleted,
-// which is strong but circumstantial) beats stale (no evidence at all, just
+// graded by what the forge says about it) beats stale (no evidence at all, just
 // age). That ordering matters because the reason decides whether -d or -D is
 // used, and picking the safest applicable reason means never forcing a deletion
 // that git would have accepted on its own.
@@ -128,13 +159,19 @@ func Classify(branches []gitdata.Branch, opts Options) Plan {
 
 	for _, b := range branches {
 		reason, ok := classifyOne(b, opts, cutoff)
-		if !ok {
+		// An unproven gone branch is reported as kept whenever verified ones
+		// are in play, so it never silently looks like a safe merge.
+		if reason == "" || (!ok && !opts.selects(ReasonVerified)) {
 			continue
 		}
 		if why, report := protectedBecause(b, opts); why != "" {
 			if report {
 				plan.Protected = append(plan.Protected, Protected{Branch: b, Why: why})
 			}
+			continue
+		}
+		if !ok {
+			plan.Protected = append(plan.Protected, Protected{Branch: b, Why: unselectedWhy[reason] + "; --gone includes it"})
 			continue
 		}
 		plan.Candidates = append(plan.Candidates, Candidate{
@@ -144,10 +181,10 @@ func Classify(branches []gitdata.Branch, opts Options) Plan {
 		})
 	}
 
-	// Group by reason (merged, gone, stale — safest first), then oldest first
-	// within a group, so the output reads as a to-do list in the order a person
-	// would work through it.
-	order := map[Reason]int{ReasonMerged: 0, ReasonGone: 1, ReasonStale: 2}
+	// Group by reason, safest first, then oldest first within a group, so the
+	// output reads as a to-do list in the order a person would work through it.
+	order := map[Reason]int{ReasonMerged: 0, ReasonVerified: 1, ReasonUnverified: 2,
+		ReasonGone: 3, ReasonClosed: 4, ReasonStale: 5}
 	sort.SliceStable(plan.Candidates, func(i, j int) bool {
 		a, b := plan.Candidates[i], plan.Candidates[j]
 		if order[a.Reason] != order[b.Reason] {
@@ -162,8 +199,9 @@ func classifyOne(b gitdata.Branch, opts Options, cutoff time.Time) (Reason, bool
 	if b.Merged && opts.selects(ReasonMerged) {
 		return ReasonMerged, true
 	}
-	if b.Gone && opts.selects(ReasonGone) {
-		return ReasonGone, true
+	if b.Gone {
+		r := goneReason(b, opts)
+		return r, opts.selects(r)
 	}
 	// Stale only covers what the other two didn't: a branch that is merged or
 	// gone is reported as such regardless of age.
@@ -172,6 +210,36 @@ func classifyOne(b gitdata.Branch, opts Options, cutoff time.Time) (Reason, bool
 		return ReasonStale, true
 	}
 	return "", false
+}
+
+var unselectedWhy = map[Reason]string{
+	ReasonUnverified: "upstream gone, merge not verified",
+	ReasonGone:       "upstream gone, no PR at this tip",
+	ReasonClosed:     "upstream gone, PR closed unmerged",
+}
+
+// goneReason weighs the forge's evidence for a gone branch. Only a PR at the
+// exact local tip counts: any other tip means unmerged or unrelated work.
+func goneReason(b gitdata.Branch, opts Options) Reason {
+	ev, ok := opts.Evidence[b.Name]
+	if !ok || b.Tip == "" {
+		return ReasonUnverified
+	}
+	reason := ReasonGone
+	for _, r := range ev.Requests {
+		if r.HeadSHA != b.Tip || r.CrossRepo {
+			continue
+		}
+		switch {
+		case r.State == "merged" && r.MergeCommitInBase && r.Base == gitdata.LocalBranchName(opts.Base):
+			return ReasonVerified
+		case r.State == "merged":
+			reason = ReasonUnverified
+		case r.State == "closed" && reason == ReasonGone:
+			reason = ReasonClosed
+		}
+	}
+	return reason
 }
 
 // protectedBecause returns why a branch must be kept, or "" when it may go.

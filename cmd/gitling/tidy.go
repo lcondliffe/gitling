@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 	"github.com/lcondliffe/gitling/internal/render"
 	"github.com/lcondliffe/gitling/internal/tidy"
@@ -25,6 +26,9 @@ type tidyOptions struct {
 	fetch      bool
 	color      bool
 	width      int
+	// lookup asks the forge about a branch's PRs; nil leaves every gone
+	// branch unverified.
+	lookup func(remoteURL, branch string) ([]forge.Request, error)
 }
 
 // runTidy parses the tidy subcommand's own flags and runs it. tidy gets a
@@ -38,7 +42,7 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 	configFlag := fs.String("config", "", "path to config file")
 
 	merged := fs.Bool("merged", false, "select branches merged into the default branch")
-	gone := fs.Bool("gone", false, "select branches whose upstream has been deleted")
+	gone := fs.Bool("gone", false, "select branches whose upstream has been deleted, even if the forge can't verify the merge")
 	stale := &staleFlag{}
 	fs.Var(stale, "stale", "also select branches untouched for this long, even unmerged (default 90d when given without a value)")
 	apply := fs.Bool("apply", false, "actually delete the branches (default: dry run)")
@@ -113,6 +117,9 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 		assumeYes:  *assumeYes,
 		fetch:      !*noFetch,
 		color:      colorEnabled(*color),
+		lookup: func(remoteURL, branch string) ([]forge.Request, error) {
+			return forge.Requests(".", remoteURL, branch)
+		},
 	}
 
 	if width, ok := render.TerminalWidth(os.Stdout); ok {
@@ -133,12 +140,15 @@ func runTidy(stdout io.Writer, stdin io.Reader, args []string) int {
 }
 
 // tidyRepo is the part of a repository tidy uses. It is declared here, at the
-// consumer, so it stays narrow: three reads and the one call that deletes.
+// consumer, so it stays narrow: a few reads and the one call that deletes.
 // Opening the real repository is runTidy's job, which leaves tidyRun — the
 // confirmation gate and the delete loop — drivable by a fake.
 type tidyRepo interface {
 	Branches() ([]gitdata.Branch, error)
 	DefaultBranch() string
+	RemoteURL() string
+	IsAncestor(maybeAncestor, descendant string) bool
+	BranchTip(name string) (string, error)
 	Fetch(prune bool) error
 	DeleteBranch(name string, force bool) error
 }
@@ -164,18 +174,21 @@ type selection struct {
 }
 
 // tidySelection maps the selector flags onto the categories Classify should
-// consider. --merged and --gone narrow; --stale only ever adds.
+// consider. --merged and --gone narrow; --stale only ever adds. Only --gone
+// selects gone branches the forge did not verify as merged.
 func tidySelection(merged, gone bool, stale staleFlag) (selection, error) {
 	sel := selection{reasons: map[tidy.Reason]bool{}}
 	if !merged && !gone {
 		sel.reasons[tidy.ReasonMerged] = true
-		sel.reasons[tidy.ReasonGone] = true
+		sel.reasons[tidy.ReasonVerified] = true
 	}
 	if merged {
 		sel.reasons[tidy.ReasonMerged] = true
 	}
 	if gone {
-		sel.reasons[tidy.ReasonGone] = true
+		for _, r := range tidy.GoneReasons {
+			sel.reasons[r] = true
+		}
 	}
 	// Bare --stale means the default threshold; with a value, that long.
 	if stale.set {
@@ -209,9 +222,11 @@ func tidyRun(stdout, stderr io.Writer, stdin io.Reader, repo tidyRepo, o tidyOpt
 	if err != nil {
 		return err
 	}
+	base := repo.DefaultBranch()
 	plan := tidy.Classify(branches, tidy.Options{
-		Base:       repo.DefaultBranch(),
+		Base:       base,
 		Reasons:    o.reasons,
+		Evidence:   forgeEvidence(repo, o.lookup, base, branches),
 		StaleAfter: o.staleAfter,
 		Protect:    o.protect,
 		Now:        time.Now(),
@@ -254,12 +269,49 @@ func tidyRun(stdout, stderr io.Writer, stdin io.Reader, repo tidyRepo, o tidyOpt
 	return nil
 }
 
+// forgeEvidence asks the forge about every gone branch that tracked origin. A
+// failed lookup leaves no entry, which Classify treats as unverified.
+func forgeEvidence(repo tidyRepo, lookup func(string, string) ([]forge.Request, error), base string, branches []gitdata.Branch) map[string]tidy.Evidence {
+	if lookup == nil {
+		return nil
+	}
+	remote := repo.RemoteURL()
+	evidence := map[string]tidy.Evidence{}
+	for _, b := range branches {
+		head, ok := strings.CutPrefix(b.Upstream, "origin/")
+		if !b.Gone || !ok {
+			continue
+		}
+		reqs, err := lookup(remote, head)
+		if err != nil {
+			continue
+		}
+		var ev tidy.Evidence
+		for _, r := range reqs {
+			ev.Requests = append(ev.Requests, tidy.Request{
+				State:             r.State,
+				HeadSHA:           r.HeadSHA,
+				Base:              r.Base,
+				CrossRepo:         r.CrossRepo,
+				MergeCommitInBase: base != "" && repo.IsAncestor(r.MergeCommit, base),
+			})
+		}
+		evidence[b.Name] = ev
+	}
+	return evidence
+}
+
 // deleteBranches applies the plan, returning the branches that could not be
 // deleted and why. One failure does not stop the rest: a branch git refuses is
 // information, not a reason to leave the remaining cleanup half done.
 func deleteBranches(repo tidyRepo, plan tidy.Plan) map[string]error {
 	failed := map[string]error{}
 	for _, c := range plan.Candidates {
+		// The plan vouched for one tip; a branch that has moved since is unvouched.
+		if tip, err := repo.BranchTip(c.Branch.Name); err != nil || tip != c.Branch.Tip {
+			failed[c.Branch.Name] = fmt.Errorf("tip changed since the plan was made")
+			continue
+		}
 		if err := repo.DeleteBranch(c.Branch.Name, c.Force); err != nil {
 			failed[c.Branch.Name] = err
 		}
@@ -334,12 +386,13 @@ Usage:
 
 By default this is a dry run over the branches that are safe to drop: those
 merged into the default branch, and those whose upstream has been deleted
-(the shape a squash-merged pull request leaves behind). Nothing is deleted
-until you pass --apply.
+after a pull request at that exact tip was merged (checked read-only with gh
+or glab). Nothing is deleted until you pass --apply.
 
 Flags:
   --merged         select only branches merged into the default branch
-  --gone           select only branches whose upstream has been deleted
+  --gone           select only branches whose upstream has been deleted,
+                    including ones the forge could not verify as merged
   --stale [dur]    also select branches untouched for dur, even unmerged
                     (default 90d; this is the category that can lose work)
   --apply          actually delete; prompts once unless --yes

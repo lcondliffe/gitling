@@ -155,7 +155,7 @@ func candidateByName(p Plan, name string) (Candidate, bool) {
 func TestRealRepoClassification(t *testing.T) {
 	repo, _ := realRepo(t)
 	plan := classifyReal(t, repo, Options{
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Protect: []string{"release/*"},
 	})
 
@@ -165,7 +165,7 @@ func TestRealRepoClassification(t *testing.T) {
 		wantForce  bool
 	}{
 		{"merged-work", ReasonMerged, false},
-		{"squashed-work", ReasonGone, true},
+		{"squashed-work", ReasonUnverified, true},
 		{"old-spike", ReasonStale, true},
 	}
 	for _, tt := range tests {
@@ -201,7 +201,7 @@ func TestRealRepoClassification(t *testing.T) {
 func TestRealRepoPlanIsExecutable(t *testing.T) {
 	repo, local := realRepo(t)
 	plan := classifyReal(t, repo, Options{
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Protect: []string{"release/*"},
 	})
 	if plan.Empty() {
@@ -235,7 +235,7 @@ func TestRealRepoPlanIsExecutable(t *testing.T) {
 func TestRealRepoUnforcedDeleteMatchesGit(t *testing.T) {
 	repo, _ := realRepo(t)
 	plan := classifyReal(t, repo, Options{
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Protect: []string{"release/*"},
 	})
 
@@ -326,11 +326,11 @@ func TestRealRepoStaleIsAdditive(t *testing.T) {
 	repo, _ := realRepo(t)
 
 	safe := classifyReal(t, repo, Options{
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true},
 		Protect: []string{"release/*"},
 	})
 	withStale := classifyReal(t, repo, Options{
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Protect: []string{"release/*"},
 	})
 

@@ -37,7 +37,7 @@ func TestTidySelection(t *testing.T) {
 		wantStaleAfter time.Duration
 	}{{
 		name:        "no flags selects the safe pair",
-		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone),
+		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonVerified),
 	}, {
 		name:        "merged narrows to merged",
 		merged:      true,
@@ -45,17 +45,17 @@ func TestTidySelection(t *testing.T) {
 	}, {
 		name:        "gone narrows to gone",
 		gone:        true,
-		wantReasons: reasons(tidy.ReasonGone),
+		wantReasons: reasons(tidy.GoneReasons...),
 	}, {
 		name:        "merged and gone together select both",
 		merged:      true,
 		gone:        true,
-		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone),
+		wantReasons: reasons(append(tidy.GoneReasons, tidy.ReasonMerged)...),
 	}, {
 		// --stale alone must widen the default pair, not replace it.
 		name:        "stale alone adds to the default pair",
 		stale:       staleFlag{set: true},
-		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonVerified, tidy.ReasonStale),
 	}, {
 		name:        "stale adds to a narrowed merged selection",
 		merged:      true,
@@ -65,23 +65,23 @@ func TestTidySelection(t *testing.T) {
 		name:        "stale adds to a narrowed gone selection",
 		gone:        true,
 		stale:       staleFlag{set: true},
-		wantReasons: reasons(tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons: reasons(append(tidy.GoneReasons, tidy.ReasonStale)...),
 	}, {
 		name:        "all three selectors",
 		merged:      true,
 		gone:        true,
 		stale:       staleFlag{set: true},
-		wantReasons: reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons: reasons(append(tidy.GoneReasons, tidy.ReasonMerged, tidy.ReasonStale)...),
 	}, {
 		// Zero threshold: tidy.Options falls back to DefaultStaleAfter.
 		name:           "bare stale leaves the threshold to the default",
 		stale:          staleFlag{set: true},
-		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonVerified, tidy.ReasonStale),
 		wantStaleAfter: 0,
 	}, {
 		name:           "stale with a value sets the threshold",
 		stale:          staleFlag{set: true, value: "180d"},
-		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonVerified, tidy.ReasonStale),
 		wantStaleAfter: 180 * day,
 	}, {
 		name:           "stale value alongside a narrowing flag",
@@ -92,7 +92,7 @@ func TestTidySelection(t *testing.T) {
 	}, {
 		name:           "stale accepts the other duration units",
 		stale:          staleFlag{set: true, value: "1y"},
-		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonGone, tidy.ReasonStale),
+		wantReasons:    reasons(tidy.ReasonMerged, tidy.ReasonVerified, tidy.ReasonStale),
 		wantStaleAfter: 365 * day,
 	}}
 
