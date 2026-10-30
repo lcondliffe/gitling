@@ -187,7 +187,8 @@ behind `open_prs`.
 
 GitLab remotes show merge requests as `Open MRs` with `!123` numbers, and
 `glab` is always given the project explicitly (from `origin`), so nested
-groups, SSH remotes and checkouts with several remotes need no extra setup.
+groups, SSH remotes and checkouts with several remotes need no extra setup;
+tidy's forge verification asks the same host and project.
 github.com and gitlab.com are recognised out of the box; map a self-managed
 host to its forge with `forge_hosts` in the config file:
 

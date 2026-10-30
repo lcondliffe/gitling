@@ -23,13 +23,19 @@ type Request struct {
 func Requests(dir, remoteURL, branch string) ([]Request, error) {
 	var argv []string
 	var parse func([]byte) ([]Request, error)
-	switch remoteHost(remoteURL) {
-	case "github.com":
+	host, web, path := parseRemote(remoteURL)
+	switch kind := hosts[host]; {
+	case path == "":
+		return nil, errors.New("unsupported forge")
+	case kind == "github":
 		argv = []string{"gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "50",
 			"--json", "state,headRefOid,baseRefName,mergeCommit,isCrossRepository"}
 		parse = parseGHRequests
-	case "gitlab.com":
-		argv = []string{"glab", "api", "projects/:id/merge_requests?state=all&per_page=50&source_branch=" + url.QueryEscape(branch)}
+	case kind == "gitlab":
+		// Same host and project as List, not glab's guess from the remotes.
+		_, hostport, _ := strings.Cut(web, "://")
+		argv = []string{"glab", "api", "--hostname", hostport,
+			"projects/" + url.PathEscape(path) + "/merge_requests?state=all&per_page=50&source_branch=" + url.QueryEscape(branch)}
 		parse = parseGLRequests
 	default:
 		return nil, errors.New("unsupported forge")
