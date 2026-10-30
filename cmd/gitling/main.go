@@ -88,6 +88,7 @@ func main() {
 	dateBasis := flag.String("date", "author", "date basis for bucketing: author, commit")
 	jsonOutput := flag.Bool("json", false, "emit machine-readable JSON for any view (see README)")
 	prs := flag.Bool("prs", true, "show open pull requests (needs the forge CLI, e.g. gh)")
+	prScope := flag.String("pr-scope", "all", "open pull requests to list: all, mine (authored by or awaiting me)")
 	fetchFlag := flag.Bool("fetch", false, "multi-repo overview: fetch each repo first for accurate ahead/behind")
 	sortFlag := flag.String("sort", "name", "multi-repo overview order: name, attention")
 	onlyFlag := flag.String("only", "", "multi-repo overview filter: attention")
@@ -213,6 +214,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gitling: invalid --sort %q (use name or attention)\n", *sortFlag)
 		os.Exit(2)
 	}
+	if *prScope != "all" && *prScope != "mine" {
+		fmt.Fprintf(os.Stderr, "gitling: invalid --pr-scope %q (use all or mine)\n", *prScope)
+		os.Exit(2)
+	}
 	if *onlyFlag != "" && *onlyFlag != "attention" {
 		fmt.Fprintf(os.Stderr, "gitling: invalid --only %q (use attention)\n", *onlyFlag)
 		os.Exit(2)
@@ -236,6 +241,7 @@ func main() {
 		width:     width,
 		height:    height,
 		prs:       *prs,
+		prScope:   *prScope,
 		fetch:     *fetchFlag,
 		sort:      *sortFlag,
 		only:      *onlyFlag,
@@ -286,7 +292,9 @@ Flags:
   --bucket <b>     activity graph bucket: day, week, month (default day)
   --date <basis>   date basis for bucketing: author, commit (default author)
   --json           emit machine-readable JSON for any view (see README)
-  --prs=false      skip the open pull requests panel (needs a forge CLI: gh)
+  --prs=false      skip the open pull requests panel (needs a forge CLI: gh, glab)
+  --pr-scope mine  only PRs you authored or whose review is requested from you
+                    (default all)
   --fetch          multi-repo overview only: fetch each repo first, for
                     accurate ahead/behind counts
   --sort <order>   multi-repo overview order: name, attention (default name)
@@ -328,6 +336,7 @@ type options struct {
 	width     int    // terminal columns; 0 when unknown (piped or redirected)
 	height    int    // terminal rows; 0 when unknown (piped or redirected)
 	prs       bool   // list open pull requests on the dashboard
+	prScope   string // "all" or "mine": authored by or awaiting me
 	fetch     bool   // multi-repo overview: fetch each repo before probing it
 	sort      string // multi-repo overview order: "name" or "attention"
 	only      string // multi-repo overview filter: "" or "attention"
@@ -416,7 +425,8 @@ func run(stdout io.Writer, o options) error {
 	prs := make(chan forge.Result, 1)
 	if o.prs && o.view == "dashboard" {
 		remote := repo.RemoteURL() // resolved here: Repo isn't used concurrently
-		go func() { prs <- forge.List(".", remote, maxPRs) }()
+		opt := forge.Options{Mine: o.prScope == "mine", Details: true}
+		go func() { prs <- forge.List(".", remote, maxPRs, opt) }()
 	} else {
 		close(prs)
 	}

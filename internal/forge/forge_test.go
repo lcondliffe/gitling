@@ -101,7 +101,7 @@ func TestGLabGetsExplicitProject(t *testing.T) {
 	} {
 		args := filepath.Join(t.TempDir(), "args")
 		stub(t, "glab", `echo "$@" > `+args+`; echo '[]'`)
-		if res := List(t.TempDir(), remote, 5); res.CLI != "glab" || res.Status != OK {
+		if res := List(t.TempDir(), remote, 5, Options{}); res.CLI != "glab" || res.Status != OK {
 			t.Errorf("%s: got %+v", remote, res)
 		}
 		recorded, err := os.ReadFile(args)
@@ -130,7 +130,7 @@ func TestListSkipsUnknownHost(t *testing.T) {
 		"https://notgithub.com/acme/thing.git",
 		"https://github.com.evil.example/acme/thing.git",
 	} {
-		res := List(".", remote, 5)
+		res := List(".", remote, 5, Options{})
 		if res.Status != Unsupported || res.Items != nil || res.CLI != "" {
 			t.Errorf("%q: got %+v, want unsupported", remote, res)
 		}
@@ -198,7 +198,7 @@ func TestListStates(t *testing.T) {
 					listTimeout = 100 * time.Millisecond
 					t.Cleanup(func() { listTimeout = old })
 				}
-				res := List(t.TempDir(), a.remote, tc.limit)
+				res := List(t.TempDir(), a.remote, tc.limit, Options{})
 				if res.CLI != a.cli || res.Status != tc.status || len(res.Items) != tc.items || res.Truncated != tc.truncated {
 					t.Errorf("got %+v, want cli %s status %s, %d items, truncated %v",
 						res, a.cli, tc.status, tc.items, tc.truncated)
@@ -220,13 +220,190 @@ func TestListRequestsOneExtra(t *testing.T) {
 		t.Run(a.cli, func(t *testing.T) {
 			args := filepath.Join(t.TempDir(), "args")
 			stub(t, a.cli, `echo "$@" > `+args+`; echo '[]'`)
-			List(t.TempDir(), a.remote, 5)
+			List(t.TempDir(), a.remote, 5, Options{})
 			recorded, err := os.ReadFile(args)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(string(recorded), a.limitFlag+" 6") {
 				t.Errorf("want %s 6 passed to the CLI: %q", a.limitFlag, recorded)
+			}
+		})
+	}
+}
+
+func TestParseGHDetails(t *testing.T) {
+	data := []byte(`[
+	  {"number":5,"reviewDecision":"APPROVED","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"},{"state":"SUCCESS"}]},
+	  {"number":4,"reviewDecision":"CHANGES_REQUESTED","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"},{"state":"FAILURE"}]},
+	  {"number":3,"reviewRequests":[{"login":"ada"}],"statusCheckRollup":[{"status":"IN_PROGRESS","conclusion":""}]},
+	  {"number":2,"reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":[]},
+	  {"number":1,"url":"https://github.com/acme/thing/pull/1","headRefOid":"abc"}
+	]`)
+	prs, err := parseGH(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		review Review
+		ci     CI
+	}{
+		{Approved, CIPassing},
+		{ChangesRequested, CIFailing},
+		{ReviewRequested, CIPending},
+		{ReviewRequested, CINone},
+		{"", ""}, // rollup not asked for: unknown, not "no checks"
+	}
+	for i, w := range want {
+		if prs[i].Review != w.review || prs[i].CI != w.ci {
+			t.Errorf("#%d: got %s/%s, want %s/%s", prs[i].Number, prs[i].Review, prs[i].CI, w.review, w.ci)
+		}
+	}
+	if prs[4].URL != "https://github.com/acme/thing/pull/1" || prs[4].SHA != "abc" {
+		t.Errorf("url/sha not parsed: %+v", prs[4])
+	}
+}
+
+const glabGraphQL = `{"data":{"project":{"mergeRequests":{"nodes":[
+  {"iid":"3","approved":true,"approvedBy":{"nodes":[{"username":"bob"}]},"headPipeline":{"status":"SUCCESS"},"reviewers":{"nodes":[{"mergeRequestInteraction":{"reviewState":"APPROVED"}}]}},
+  {"iid":"2","approved":true,"approvedBy":{"nodes":[]},"headPipeline":null,"reviewers":{"nodes":[{"mergeRequestInteraction":{"reviewState":"REQUESTED_CHANGES"}}]}},
+  {"iid":"1","approved":false,"approvedBy":{"nodes":[]},"headPipeline":{"status":"RUNNING"},"reviewers":{"nodes":[]}}
+]}}}}`
+
+func TestParseGLabDetails(t *testing.T) {
+	got, err := parseGLabDetails([]byte(glabGraphQL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]PR{
+		3: {Review: Approved, CI: CIPassing},
+		2: {Review: ChangesRequested, CI: CINone},
+		1: {Review: ReviewRequested, CI: CIPending},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for iid, w := range want {
+		if got[iid] != w {
+			t.Errorf("!%d: got %+v, want %+v", iid, got[iid], w)
+		}
+	}
+	// Approved with nobody approving is just "no approvals required".
+	if r := glabReview(true, 0, nil); r != "" {
+		t.Errorf("glabReview(true, 0) = %q, want none", r)
+	}
+	if _, err := parseGLabDetails([]byte(`{"data":{"project":null},"errors":[{"message":"nope"}]}`)); err == nil {
+		t.Error("a GraphQL error should fail")
+	}
+}
+
+// The GraphQL enrichment asks the same host and project as the listing.
+func TestGLabDetailsTargetsListedProject(t *testing.T) {
+	if err := AddHost("git.corp.example", "gitlab"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { delete(hosts, "git.corp.example") })
+	args := filepath.Join(t.TempDir(), "args")
+	list := `[{"iid":3,"title":"c","author":{"username":"ada"},"updated_at":"2024-06-15T10:00:00Z"}]`
+	stub(t, "glab", `echo "$@" >> `+args+`; if [ "$1" = api ]; then echo '`+glabGraphQL+`'; else echo '`+list+`'; fi`)
+	res := List(t.TempDir(), "https://git.corp.example:8443/grp/sub/proj.git", 5, Options{Details: true})
+	if res.Details != OK {
+		t.Fatalf("got %+v", res)
+	}
+	recorded, err := os.ReadFile(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(recorded)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "--repo https://git.corp.example:8443/grp/sub/proj ") ||
+		!strings.HasPrefix(lines[1], "api --hostname git.corp.example:8443 graphql") || !strings.HasSuffix(lines[1], "p=grp/sub/proj") {
+		t.Errorf("argv %q", lines)
+	}
+}
+
+// glab gets review/CI state from a second call; its failure keeps the list
+// and says so.
+func TestListGLabDetails(t *testing.T) {
+	list := `[{"iid":3,"title":"c","author":{"username":"ada"},"updated_at":"2024-06-15T10:00:00Z","web_url":"https://gitlab.com/acme/thing/-/merge_requests/3"}]`
+	for _, tc := range []struct {
+		name, api string
+		details   Status
+		review    Review
+	}{
+		{"ok", "echo '" + glabGraphQL + "'", OK, Approved},
+		{"forbidden", `echo "HTTP 403" >&2; exit 1`, Failed, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub(t, "glab", `if [ "$1" = api ]; then `+tc.api+`; else echo '`+list+`'; fi`)
+			res := List(t.TempDir(), "git@gitlab.com:acme/thing.git", 5, Options{Details: true})
+			if res.Status != OK || len(res.Items) != 1 || res.Details != tc.details || res.Items[0].Review != tc.review {
+				t.Errorf("got %+v", res)
+			}
+			if (tc.details != OK) != (res.DetailsNote() != "") {
+				t.Errorf("DetailsNote = %q for %s", res.DetailsNote(), tc.details)
+			}
+		})
+	}
+}
+
+// Every query asks the forge for recently updated first: the CLIs default to
+// creation order, so an old PR updated today would fall past the limit.
+func TestListSortsByUpdatedServerSide(t *testing.T) {
+	for _, a := range []struct{ cli, remote, sort string }{
+		{"gh", "https://github.com/acme/thing.git", "sort:updated-desc"},
+		{"glab", "git@gitlab.com:acme/thing.git", "--order updated_at --sort desc"},
+	} {
+		for _, mine := range []bool{false, true} {
+			args := filepath.Join(t.TempDir(), "args")
+			stub(t, a.cli, `echo "$@" >> `+args+`; echo '[]'`)
+			List(t.TempDir(), a.remote, 5, Options{Mine: mine})
+			recorded, err := os.ReadFile(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(recorded)), "\n") {
+				if !strings.Contains(line, a.sort) {
+					t.Errorf("%s mine=%v: query without %q: %q", a.cli, mine, a.sort, line)
+				}
+			}
+		}
+	}
+}
+
+// gh gets review/CI state in the same call, from extra --json fields.
+func TestListGHDetailsArgs(t *testing.T) {
+	args := filepath.Join(t.TempDir(), "args")
+	stub(t, "gh", `echo "$@" > `+args+`; echo '[]'`)
+	List(t.TempDir(), "https://github.com/acme/thing.git", 5, Options{Details: true})
+	recorded, err := os.ReadFile(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recorded), "statusCheckRollup") {
+		t.Errorf("want review/CI fields requested: %q", recorded)
+	}
+}
+
+// mine runs one query per personal scope, then dedupes and ranks before the
+// limit.
+func TestListMine(t *testing.T) {
+	for _, a := range []struct{ cli, remote, authored, awaiting string }{
+		{"gh", "https://github.com/acme/thing.git",
+			`[{"number":3,"updatedAt":"2024-06-13T10:00:00Z"},{"number":2,"updatedAt":"2024-06-14T10:00:00Z"}]`,
+			`[{"number":2,"updatedAt":"2024-06-14T10:00:00Z"},{"number":9,"updatedAt":"2024-06-15T10:00:00Z"}]`},
+		{"glab", "git@gitlab.com:acme/thing.git",
+			`[{"iid":3,"updated_at":"2024-06-13T10:00:00Z"},{"iid":2,"updated_at":"2024-06-14T10:00:00Z"}]`,
+			`[{"iid":2,"updated_at":"2024-06-14T10:00:00Z"},{"iid":9,"updated_at":"2024-06-15T10:00:00Z"}]`},
+	} {
+		t.Run(a.cli, func(t *testing.T) {
+			stub(t, a.cli, `case "$*" in *--author*) echo '`+a.authored+`';; *) echo '`+a.awaiting+`';; esac`)
+			res := List(t.TempDir(), a.remote, 2, Options{Mine: true})
+			var got []int
+			for _, pr := range res.Items {
+				got = append(got, pr.Number)
+			}
+			if res.Status != OK || !res.Truncated || len(got) != 2 || got[0] != 9 || got[1] != 2 {
+				t.Errorf("got %v truncated %v status %s, want [9 2] truncated", got, res.Truncated, res.Status)
 			}
 		})
 	}

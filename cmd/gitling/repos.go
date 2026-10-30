@@ -171,7 +171,7 @@ func probeGroup(o options, cs []checkout) []render.RepoRow {
 		if o.prs {
 			if !prsDone {
 				prsDone = true
-				prs = forge.List(c.path, repo.RemoteURL(), overviewPRLimit)
+				prs = forge.List(c.path, repo.RemoteURL(), overviewPRLimit, forge.Options{Mine: o.prScope == "mine"})
 			}
 			rows[i].PRs = prs
 		}
