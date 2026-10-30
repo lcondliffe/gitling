@@ -43,21 +43,82 @@ func equal(a, b []string) bool {
 	return true
 }
 
-func TestClassifyDefaultsToMergedAndGone(t *testing.T) {
+// verifiedPR is a same-repo PR merged into main at the test branches' tip.
+var verifiedPR = Request{State: "merged", HeadSHA: "abc1234", Base: "main", MergeCommitInBase: true}
+
+func TestClassifyDefaultsToMergedAndVerified(t *testing.T) {
 	branches := []gitdata.Branch{
 		branch("main", head),
 		branch("chore/tidy", merged),
 		branch("feat/x", gone),
+		branch("feat/y", gone),
 		branch("old/thing", old),
 		branch("live/work"),
 	}
-	plan := Classify(branches, Options{Base: "origin/main", Now: now})
+	plan := Classify(branches, Options{
+		Base:     "origin/main",
+		Evidence: map[string]Evidence{"feat/x": {Requests: []Request{verifiedPR}}},
+		Now:      now,
+	})
 
 	if want := []string{"chore/tidy", "feat/x"}; !equal(names(plan.Candidates), want) {
 		t.Errorf("candidates = %v, want %v", names(plan.Candidates), want)
 	}
-	if plan.Total != 5 {
-		t.Errorf("Total = %d, want 5", plan.Total)
+	// The unverified gone branch is kept, and said so.
+	if len(plan.Protected) != 1 || plan.Protected[0].Branch.Name != "feat/y" ||
+		plan.Protected[0].Why != "upstream gone, merge not verified; --gone includes it" {
+		t.Errorf("Protected = %+v, want feat/y kept as unverified", plan.Protected)
+	}
+	if plan.Total != 6 {
+		t.Errorf("Total = %d, want 6", plan.Total)
+	}
+}
+
+// Only a same-repo merged PR at the exact local tip, into the base, with its
+// merge commit still in the base, is verified. Everything else is weaker.
+func TestClassifyGoneEvidence(t *testing.T) {
+	with := func(mod func(*Request)) []Request {
+		r := verifiedPR
+		mod(&r)
+		return []Request{r}
+	}
+	tests := []struct {
+		name     string
+		evidence *Evidence // nil: the forge could not be asked
+		want     Reason
+	}{
+		{"verified squash merge", &Evidence{Requests: []Request{verifiedPR}}, ReasonVerified},
+		{"forge unavailable", nil, ReasonUnverified},
+		{"deleted unmerged, no PR", &Evidence{}, ReasonGone},
+		{"closed unmerged", &Evidence{Requests: with(func(r *Request) { r.State = "closed" })}, ReasonClosed},
+		{"open PR at this tip", &Evidence{Requests: with(func(r *Request) { r.State = "open" })}, ReasonGone},
+		// Reused name: an old PR merged at another tip says nothing about this one.
+		{"reused branch name", &Evidence{Requests: with(func(r *Request) { r.HeadSHA = "0ld0ld0" })}, ReasonGone},
+		{"fork PR with the same name", &Evidence{Requests: with(func(r *Request) { r.CrossRepo = true })}, ReasonGone},
+		// Rewritten history: merged, but the merge commit is no longer in base.
+		{"merge commit not in base", &Evidence{Requests: with(func(r *Request) { r.MergeCommitInBase = false })}, ReasonUnverified},
+		{"merged into another base", &Evidence{Requests: with(func(r *Request) { r.Base = "release" })}, ReasonUnverified},
+		{"reused name with a verified merge too", &Evidence{Requests: append(with(func(r *Request) { r.State = "closed" }), verifiedPR)}, ReasonVerified},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := Options{Base: "origin/main", Reasons: map[Reason]bool{}, Evidence: map[string]Evidence{}, Now: now}
+			for _, r := range GoneReasons {
+				opts.Reasons[r] = true
+			}
+			if tt.evidence != nil {
+				opts.Evidence["feat/x"] = *tt.evidence
+			}
+			plan := Classify([]gitdata.Branch{branch("feat/x", gone)}, opts)
+			if len(plan.Candidates) != 1 || plan.Candidates[0].Reason != tt.want || !plan.Candidates[0].Force {
+				t.Errorf("plan = %+v, want one forced %q candidate", plan.Candidates, tt.want)
+			}
+			// Without --gone, only the verified case is deletable by default.
+			plan = Classify([]gitdata.Branch{branch("feat/x", gone)}, Options{Base: "origin/main", Evidence: opts.Evidence, Now: now})
+			if got := !plan.Empty(); got != (tt.want == ReasonVerified) {
+				t.Errorf("default selection picked it = %v, want %v", got, tt.want == ReasonVerified)
+			}
+		})
 	}
 }
 
@@ -70,7 +131,7 @@ func TestClassifyForcesEverythingButMerged(t *testing.T) {
 		branch("old/thing", old),
 	}, Options{
 		Base:    "main",
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Now:     now,
 	})
 
@@ -93,7 +154,7 @@ func TestClassifyPrefersTheSafestApplicableReason(t *testing.T) {
 		branch("goneAndOld", gone, old),
 	}, Options{
 		Base:    "main",
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Now:     now,
 	})
 
@@ -104,8 +165,8 @@ func TestClassifyPrefersTheSafestApplicableReason(t *testing.T) {
 	if got := byName["both"]; got.Reason != ReasonMerged || got.Force {
 		t.Errorf("merged+old = %+v, want merged and unforced", got)
 	}
-	if got := byName["goneAndOld"]; got.Reason != ReasonGone {
-		t.Errorf("gone+old reason = %q, want %q", got.Reason, ReasonGone)
+	if got := byName["goneAndOld"]; got.Reason != ReasonUnverified {
+		t.Errorf("gone+old reason = %q, want %q", got.Reason, ReasonUnverified)
 	}
 }
 
@@ -118,7 +179,7 @@ func TestClassifyStaleOnlyWhenSelected(t *testing.T) {
 
 	plan := Classify(branches, Options{
 		Base:    "main",
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Now:     now,
 	})
 	if want := []string{"old/thing"}; !equal(names(plan.Candidates), want) {
@@ -244,7 +305,7 @@ func TestClassifyOrdersByReasonThenAge(t *testing.T) {
 		branch("merged-a", merged, func(b *gitdata.Branch) { b.LastCommit = now.AddDate(0, 0, -5) }),
 	}, Options{
 		Base:    "main",
-		Reasons: map[Reason]bool{ReasonMerged: true, ReasonGone: true, ReasonStale: true},
+		Reasons: map[Reason]bool{ReasonMerged: true, ReasonUnverified: true, ReasonStale: true},
 		Now:     now,
 	})
 
@@ -262,7 +323,7 @@ func TestClassifyNarrowsToSelectedReason(t *testing.T) {
 		t.Errorf("--merged selected %v, want %v", names(plan.Candidates), want)
 	}
 
-	plan = Classify(branches, Options{Base: "main", Reasons: map[Reason]bool{ReasonGone: true}, Now: now})
+	plan = Classify(branches, Options{Base: "main", Reasons: map[Reason]bool{ReasonUnverified: true}, Now: now})
 	if want := []string{"feat/x"}; !equal(names(plan.Candidates), want) {
 		t.Errorf("--gone selected %v, want %v", names(plan.Candidates), want)
 	}

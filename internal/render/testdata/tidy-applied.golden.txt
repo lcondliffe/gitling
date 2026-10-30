@@ -4,7 +4,7 @@ TIDY  ·  3 branches deleted
   merged into origin/main   -d
     chore/tidy-readme   14d ago    a1b2c3d   deleted
 
-  upstream gone (squash-merged)   -D
+  squash-merged, verified on the forge   -D
     feat/heatmap        1mo ago    9f8e7d6   kept: git branch -D: the branch is not fully merged
     fix/parse-numstat   3mo ago    4c5b6a7   deleted
 

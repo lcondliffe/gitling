@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lcondliffe/gitling/internal/forge"
 	"github.com/lcondliffe/gitling/internal/gitdata"
 	"github.com/lcondliffe/gitling/internal/tidy"
 )
@@ -30,7 +31,11 @@ type fakeRepo struct {
 	base       string
 	fetchErr   error
 	branchErr  error
-	deleteErrs map[string]error // by branch name; a branch git would refuse
+	deleteErrs map[string]error           // by branch name; a branch git would refuse
+	requests   map[string][]forge.Request // forge PRs by head branch
+	lookupErr  error                      // the forge can't be asked
+	inBase     map[string]bool            // commits reachable from base
+	moved      map[string]string          // branch tips that changed after planning
 
 	fetched int
 	pruned  bool // whether the last fetch asked for a prune
@@ -45,6 +50,26 @@ func (f *fakeRepo) Branches() ([]gitdata.Branch, error) {
 }
 
 func (f *fakeRepo) DefaultBranch() string { return f.base }
+
+func (f *fakeRepo) RemoteURL() string { return "git@github.com:o/r.git" }
+
+func (f *fakeRepo) IsAncestor(a, _ string) bool { return f.inBase[a] }
+
+func (f *fakeRepo) BranchTip(name string) (string, error) {
+	if tip, ok := f.moved[name]; ok {
+		return tip, nil
+	}
+	for _, b := range f.branches {
+		if b.Name == name {
+			return b.Tip, nil
+		}
+	}
+	return "", nil
+}
+
+func (f *fakeRepo) lookup(_, branch string) ([]forge.Request, error) {
+	return f.requests[branch], f.lookupErr
+}
 
 func (f *fakeRepo) Fetch(prune bool) error {
 	f.fetched++
@@ -68,8 +93,8 @@ func (f *fakeRepo) names() []string {
 
 // newFakeRepo returns a repository with one of each interesting shape: the
 // default branch (checked out, never a candidate), a merged branch that -d
-// would accept, a gone branch that needs -D, and an active branch that is not a
-// candidate at all.
+// would accept, a forge-verified gone branch that needs -D, and an active
+// branch that is not a candidate at all.
 func newFakeRepo() *fakeRepo {
 	now := time.Now()
 	return &fakeRepo{
@@ -80,6 +105,10 @@ func newFakeRepo() *fakeRepo {
 			{Name: "feat/gone", Gone: true, Upstream: "origin/feat/gone", Tip: "ccc3333", LastCommit: now.Add(-24 * time.Hour)},
 			{Name: "feat/active", Tip: "ddd4444", LastCommit: now},
 		},
+		requests: map[string][]forge.Request{
+			"feat/gone": {{State: "merged", HeadSHA: "ccc3333", Base: "main", MergeCommit: "mmm"}},
+		},
+		inBase: map[string]bool{"mmm": true},
 	}
 }
 
@@ -91,6 +120,9 @@ func applyOpts() tidyOptions {
 func runTidyWith(t *testing.T, repo tidyRepo, stdin string, o tidyOptions) (stdout, stderr string, err error) {
 	t.Helper()
 	var out, errOut bytes.Buffer
+	if f, ok := repo.(*fakeRepo); ok && o.lookup == nil {
+		o.lookup = f.lookup
+	}
 	err = tidyRun(&out, &errOut, strings.NewReader(stdin), repo, o)
 	return out.String(), errOut.String(), err
 }
@@ -453,3 +485,69 @@ var _ tidyRepo = (*fakeRepo)(nil)
 
 // The real repository has to satisfy it too, since runTidy passes one in.
 var _ tidyRepo = (*gitdata.Repo)(nil)
+
+// An unreachable forge must never let a gone branch through by default; --gone
+// is the explicit opt-in.
+func TestTidyRunForgeUnavailableNeedsExplicitGone(t *testing.T) {
+	repo := newFakeRepo()
+	repo.lookupErr = errors.New("gh: not logged in")
+	o := applyOpts()
+	o.assumeYes = true
+
+	out, _, err := runTidyWith(t, repo, "", o)
+	if err != nil {
+		t.Fatalf("tidyRun() error: %v", err)
+	}
+	if got := repo.names(); len(got) != 1 || got[0] != "feat/merged" {
+		t.Errorf("deleted %v, want only the git-merged branch", got)
+	}
+	if !strings.Contains(out, "kept feat/gone (upstream gone, merge not verified; --gone includes it)") {
+		t.Errorf("output does not say why feat/gone was kept:\n%s", out)
+	}
+
+	repo = newFakeRepo()
+	repo.lookupErr = errors.New("gh: not logged in")
+	sel, _ := tidySelection(false, true, staleFlag{})
+	o.reasons = sel.reasons
+	if _, _, err := runTidyWith(t, repo, "", o); err != nil {
+		t.Fatalf("tidyRun() error: %v", err)
+	}
+	if got := repo.names(); len(got) != 1 || got[0] != "feat/gone" {
+		t.Errorf("--gone deleted %v, want feat/gone", got)
+	}
+}
+
+// Rewritten history: the PR merged, but its merge commit is no longer in base.
+func TestTidyRunMergeCommitMissingFromBase(t *testing.T) {
+	repo := newFakeRepo()
+	repo.inBase = nil
+	o := applyOpts()
+	o.assumeYes = true
+	if _, _, err := runTidyWith(t, repo, "", o); err != nil {
+		t.Fatalf("tidyRun() error: %v", err)
+	}
+	for _, name := range repo.names() {
+		if name == "feat/gone" {
+			t.Fatal("deleted feat/gone though its merge commit is not in base")
+		}
+	}
+}
+
+// A branch that moved after planning is no longer the tip the forge vouched for.
+func TestTidyRunTipMovedIsKept(t *testing.T) {
+	repo := newFakeRepo()
+	repo.moved = map[string]string{"feat/gone": "eee5555"}
+	o := applyOpts()
+	o.assumeYes = true
+
+	out, _, err := runTidyWith(t, repo, "", o)
+	if err == nil {
+		t.Fatal("tidyRun() = nil error, want the moved branch reported")
+	}
+	if got := repo.names(); len(got) != 1 || got[0] != "feat/merged" {
+		t.Errorf("deleted %v, want feat/gone left alone", got)
+	}
+	if !strings.Contains(out, "tip changed since the plan was made") {
+		t.Errorf("output missing the reason:\n%s", out)
+	}
+}

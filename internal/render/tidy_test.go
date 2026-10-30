@@ -21,8 +21,8 @@ func goldenTidyPlan() tidy.Plan {
 		StaleAfter: tidy.DefaultStaleAfter,
 		Candidates: []tidy.Candidate{
 			{Branch: br("chore/tidy-readme", "a1b2c3d4e5f6", 14*24*time.Hour), Reason: tidy.ReasonMerged},
-			{Branch: br("feat/heatmap", "9f8e7d6c5b4a", 35*24*time.Hour), Reason: tidy.ReasonGone, Force: true},
-			{Branch: br("fix/parse-numstat", "4c5b6a7d8e9f", 100*24*time.Hour), Reason: tidy.ReasonGone, Force: true},
+			{Branch: br("feat/heatmap", "9f8e7d6c5b4a", 35*24*time.Hour), Reason: tidy.ReasonVerified, Force: true},
+			{Branch: br("fix/parse-numstat", "4c5b6a7d8e9f", 100*24*time.Hour), Reason: tidy.ReasonVerified, Force: true},
 			{Branch: br("spike/old-idea", "1122334455aa", 300*24*time.Hour), Reason: tidy.ReasonStale, Force: true},
 		},
 		Protected: []tidy.Protected{
@@ -76,7 +76,7 @@ func TestTidyResultWithAllFailuresOmitsRestoreHint(t *testing.T) {
 		Base:  "main",
 		Total: 1,
 		Candidates: []tidy.Candidate{
-			{Branch: gitdata.Branch{Name: "feat/x", Tip: "abc1234", LastCommit: goldenNow}, Reason: tidy.ReasonGone, Force: true},
+			{Branch: gitdata.Branch{Name: "feat/x", Tip: "abc1234", LastCommit: goldenNow}, Reason: tidy.ReasonVerified, Force: true},
 		},
 	}
 	var buf bytes.Buffer
@@ -163,7 +163,7 @@ func TestTidyAppliedWithAllFailuresOmitsRestoreHint(t *testing.T) {
 		Base:  "main",
 		Total: 1,
 		Candidates: []tidy.Candidate{
-			{Branch: gitdata.Branch{Name: "feat/x", Tip: "abc1234", LastCommit: goldenNow}, Reason: tidy.ReasonGone, Force: true},
+			{Branch: gitdata.Branch{Name: "feat/x", Tip: "abc1234", LastCommit: goldenNow}, Reason: tidy.ReasonVerified, Force: true},
 		},
 	}
 	var buf bytes.Buffer

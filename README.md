@@ -215,10 +215,10 @@ the full error goes to stderr.
 branches you're done with and, on request, deletes them:
 
 ```sh
-gitling tidy                  # dry run over merged + upstream-gone branches
+gitling tidy                  # dry run over merged + forge-verified squash merges
 gitling tidy --apply          # delete them, prompting once first
 gitling tidy --merged         # narrow to branches merged into the default branch
-gitling tidy --gone           # narrow to branches whose upstream was deleted
+gitling tidy --gone           # narrow to upstream-gone branches, verified or not
 gitling tidy --stale          # also include branches untouched for 90 days
 gitling tidy --stale 180d     # ...with a different threshold
 gitling tidy --protect 'release/*'   # never delete matching branches
@@ -232,7 +232,7 @@ TIDY  ·  4 of 9 branches
   merged into origin/main   -d
     chore/tidy-readme   14d ago    a1b2c3d
 
-  upstream gone (squash-merged)   -D
+  squash-merged, verified on the forge   -D
     feat/heatmap        1mo ago    9f8e7d6
     fix/parse-numstat   3mo ago    4c5b6a7
 
@@ -247,12 +247,16 @@ Which group a branch lands in decides how it gets deleted:
 - **merged** — the tip is an ancestor of the default branch, so the work is
   provably in. Deleted with `git branch -d`, leaving git's own merge check as a
   second safety net under gitling's.
-- **gone** — the branch tracked a remote branch that no longer exists: the shape
-  a squash-merged pull request leaves behind. The commits landed under new
-  hashes, so git sees the branch as unmerged and only `-D` will drop it. The
-  forge deleting the remote branch is evidence it's safe, but circumstantial
-  rather than proof — which is why the plan marks these `-D` rather than hiding
-  the distinction.
+- **verified** — the upstream is gone and the forge (read-only, via `gh` or
+  `glab`) has a pull request from this repo, at exactly the local tip, merged
+  into the default branch, whose merge or squash commit is still in it. The
+  commits landed under new hashes, so git sees the branch as unmerged and only
+  `-D` will drop it.
+- **gone, closed, could not verify** — the upstream is gone but the forge has no
+  PR at this tip (deleted unmerged, pushed to after merging, a reused name, a
+  fork), the PR was closed unmerged, or the forge couldn't be asked or its
+  answer didn't check out. These are listed as kept and only selected with
+  `--gone`.
 - **stale** — old, and neither merged nor gone. The only category where deleting
   can lose work, so it's never selected unless you ask with `--stale`.
 
@@ -278,6 +282,8 @@ into your local `main` but never pushed is treated as unmerged and needs `-D`.
   fetch warns and continues — being offline shouldn't stop you tidying merged
   branches — but it says so, because the plan is then built on older
   information.
+- **Each tip is rechecked just before deletion**; a branch that moved since the
+  plan was made is kept.
 - A branch git refuses to delete is reported and the rest still run.
 
 ## Config file

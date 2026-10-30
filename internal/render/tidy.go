@@ -29,9 +29,12 @@ type TidyModel struct {
 // in it — the difference between "provably merged" and "probably merged" is the
 // whole safety story of this command.
 var reasonHeadings = map[tidy.Reason]string{
-	tidy.ReasonMerged: "merged into %s",
-	tidy.ReasonGone:   "upstream gone (squash-merged)",
-	tidy.ReasonStale:  "stale, never merged",
+	tidy.ReasonMerged:     "merged into %s",
+	tidy.ReasonVerified:   "squash-merged, verified on the forge",
+	tidy.ReasonUnverified: "upstream gone, could not verify merge",
+	tidy.ReasonGone:       "upstream gone, no PR at this tip",
+	tidy.ReasonClosed:     "upstream gone, PR closed unmerged",
+	tidy.ReasonStale:      "stale, never merged",
 }
 
 // Tidy prints the cleanup plan: the candidate branches grouped by why they were
