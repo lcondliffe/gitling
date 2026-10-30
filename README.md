@@ -73,6 +73,7 @@ gitling --recent 10      # list the last 10 commits (0 hides the panel)
 gitling --layout stack   # force one column; --layout wide forces two
 gitling --layout compact # prioritize current state in short panes
 gitling --prs=false      # skip the open pull requests panel
+gitling --pr-scope mine  # only PRs you authored or are asked to review
 gitling --json           # structured data for scripts/integrations (any view)
 gitling --path services/api --exclude '*.lock'  # scope history to part of a monorepo
 gitling --exclude-author 'renovate[bot]'        # leave an automation account out
@@ -199,6 +200,14 @@ host to its forge with `forge_hosts` in the config file:
 `glab` must already be logged in to that host (`glab auth login --hostname
 gitlab.example.com`). It needs a recent `glab` with `mr list --output json`
 (tested with 1.126; distro builds such as 1.36 lack it).
+
+Each PR shows its review state (review requested, approved, changes requested)
+and CI state (pending, passing, failing, or "no ci" when nothing ran — never
+passing). For GitLab these come from a second `glab api graphql` call; if it
+fails the list still shows and says review/CI is unknown (`forge.details` in
+JSON). `--pr-scope mine` lists only PRs you authored or whose review is
+requested from you. In `--json` each PR also carries its `url`, head `sha`,
+`review` and `ci` (empty when unknown).
 
 ## Many repos
 

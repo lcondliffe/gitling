@@ -362,6 +362,9 @@ func (p palette) prLines(m Model, width int) []string {
 	if m.PRs.Truncated {
 		lines = append(lines, "  "+p.c(cLabel, fmt.Sprintf("showing %d; more open", len(m.PRs.Items))))
 	}
+	if note := m.PRs.DetailsNote(); note != "" {
+		lines = append(lines, "  "+p.c(cAmber, note))
+	}
 	return lines
 }
 
@@ -1068,17 +1071,21 @@ func (p palette) recent(w io.Writer, cs []gitdata.RecentCommit, now time.Time, w
 
 // prs draws the open pull requests, one per line:
 //
-//	#123  fix: the thing                    alice  2h ago
+//	#123  fix: the thing          approved · ci passing  alice  2h ago
 //
 // Same shape as recent, and the same trade-off: the title is the flexible
 // column and is truncated rather than wrapped so a PR stays on one line.
+// The review/CI column is dropped when no PR has either.
 //
 // prs must be non-empty; prLines handles the other states.
 func (p palette) prs(w io.Writer, prs []forge.PR, sigil string, now time.Time, width int) {
-	numW, authorW, agoW, titleW := 0, 0, 0, 0
+	numW, stateW, authorW, agoW, titleW := 0, 0, 0, 0, 0
 	for _, pr := range prs {
 		if n := cellLen(prNumber(pr, sigil)); n > numW {
 			numW = n
+		}
+		if n := cellLen(prStatePlain(pr)); n > stateW {
+			stateW = n
 		}
 		if n := cellLen(prTitleText(pr)); n > titleW {
 			titleW = n
@@ -1096,6 +1103,9 @@ func (p palette) prs(w io.Writer, prs []forge.PR, sigil string, now time.Time, w
 
 	// "  " + number + "  " + title + "  " + author + "  " + ago.
 	overhead := 2 + numW + 2 + 2 + authorW + 2 + agoW
+	if stateW > 0 {
+		overhead += stateW + 2
+	}
 	if width > 0 {
 		const minTitleW = 12
 		if avail := max(width-overhead, minTitleW); avail < titleW {
@@ -1109,6 +1119,9 @@ func (p palette) prs(w io.Writer, prs []forge.PR, sigil string, now time.Time, w
 		b.WriteString("  " + p.c(cAccent, num) + strings.Repeat(" ", numW-cellLen(num)) + "  ")
 		title := truncate(prTitleText(pr), titleW)
 		b.WriteString(title + strings.Repeat(" ", titleW-cellLen(title)) + "  ")
+		if stateW > 0 {
+			b.WriteString(p.prState(pr) + strings.Repeat(" ", stateW-cellLen(prStatePlain(pr))) + "  ")
+		}
 		author := truncate(pr.Author, authorW)
 		b.WriteString(p.c(cLabel, author) + strings.Repeat(" ", authorW-cellLen(author)) + "  ")
 		b.WriteString(p.c(cLabel, humanAgo(pr.Updated, now)))
@@ -1117,6 +1130,34 @@ func (p palette) prs(w io.Writer, prs []forge.PR, sigil string, now time.Time, w
 }
 
 func prNumber(pr forge.PR, sigil string) string { return sigil + strconv.Itoa(pr.Number) }
+
+// prState is the compact review and CI cell. Unknown state is left out; no
+// checks says so rather than passing.
+func (p palette) prState(pr forge.PR) string {
+	var parts []string
+	add := func(s, c string) { parts = append(parts, p.c(c, s)) }
+	switch pr.Review {
+	case forge.ReviewRequested:
+		add("review requested", cAmber)
+	case forge.Approved:
+		add("approved", cAccent)
+	case forge.ChangesRequested:
+		add("changes requested", cRed)
+	}
+	switch pr.CI {
+	case forge.CINone:
+		add("no ci", cLabel)
+	case forge.CIPending:
+		add("ci pending", cAmber)
+	case forge.CIPassing:
+		add("ci passing", cAccent)
+	case forge.CIFailing:
+		add("ci failing", cRed)
+	}
+	return strings.Join(parts, p.c(cLabel, " · "))
+}
+
+func prStatePlain(pr forge.PR) string { return palette{}.prState(pr) }
 
 // prTitleText marks drafts inline rather than in a column of their own: most
 // lists have none, and an empty column costs every row.

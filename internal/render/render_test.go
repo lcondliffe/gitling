@@ -683,6 +683,33 @@ func TestOpenPRsPanel(t *testing.T) {
 	}
 }
 
+// Review and CI read the same for either forge; unknown CI is blank, no checks
+// is never passing.
+func TestOpenPRsReviewAndCI(t *testing.T) {
+	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
+	for _, cli := range []string{"gh", "glab"} {
+		var buf bytes.Buffer
+		Dashboard(&buf, Model{Now: now, Width: 120, PRs: forge.Result{CLI: cli, Status: forge.OK, Items: []forge.PR{
+			{Number: 3, Title: "a", Author: "ada", Updated: now, Review: forge.Approved, CI: forge.CIPassing},
+			{Number: 2, Title: "b", Author: "ada", Updated: now, Review: forge.ChangesRequested, CI: forge.CIFailing},
+			{Number: 1, Title: "c", Author: "ada", Updated: now, Review: forge.ReviewRequested, CI: forge.CINone},
+		}}}, false)
+		out := buf.String()
+		for _, want := range []string{"approved · ci passing", "changes requested · ci failing", "review requested · no ci"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: missing %q:\n%s", cli, want, out)
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	Dashboard(&buf, Model{Now: now, Width: 120, PRs: forge.Result{CLI: "glab", Status: forge.OK, Details: forge.Timeout,
+		Items: []forge.PR{{Number: 1, Title: "c", Author: "ada", Updated: now}}}}, false)
+	if out := buf.String(); !strings.Contains(out, "review/CI unknown: glab timed out") || strings.Contains(out, "passing") {
+		t.Errorf("unknown details should say why and claim nothing:\n%s", out)
+	}
+}
+
 // Each forge state renders its own way, in every layout.
 func TestOpenPRsPanelStates(t *testing.T) {
 	now := time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC)
@@ -765,6 +792,12 @@ func TestJSONForgeMetadata(t *testing.T) {
 	}
 	if prs := got["open_prs"].([]any); len(prs) != 1 {
 		t.Errorf("open_prs = %#v, want one item", prs)
+	}
+	got = decode(forge.Result{CLI: "gh", Status: forge.OK, CheckedAt: now, Items: []forge.PR{{Number: 7, Updated: now,
+		URL: "https://github.com/acme/thing/pull/7", SHA: "abc", Review: forge.Approved, CI: forge.CINone}}})
+	pr := got["open_prs"].([]any)[0].(map[string]any)
+	if pr["url"] != "https://github.com/acme/thing/pull/7" || pr["sha"] != "abc" || pr["review"] != "approved" || pr["ci"] != "none" {
+		t.Errorf("open_prs[0] = %#v, want url, sha, review and ci", pr)
 	}
 	if got := decode(forge.Result{CLI: "gh", Status: forge.Unauthenticated, CheckedAt: now}); got["forge"].(map[string]any)["status"] != "unauthenticated" {
 		t.Errorf("forge = %#v, want unauthenticated", got["forge"])

@@ -130,22 +130,30 @@ type jsonForge struct {
 	Status    string `json:"status"`
 	Truncated bool   `json:"truncated"`
 	CheckedAt string `json:"checked_at"`
+	// Details is the status of a separate review/CI lookup, when there was one.
+	Details string `json:"details,omitempty"`
 }
 
 func jsonForgeOf(r forge.Result) *jsonForge {
 	if r.Status == "" {
 		return nil
 	}
-	return &jsonForge{CLI: r.CLI, Status: string(r.Status), Truncated: r.Truncated, CheckedAt: r.CheckedAt.Format(time.RFC3339)}
+	return &jsonForge{CLI: r.CLI, Status: string(r.Status), Truncated: r.Truncated,
+		CheckedAt: r.CheckedAt.Format(time.RFC3339), Details: string(r.Details)}
 }
 
-// jsonPR is one open pull request on the forge.
+// jsonPR is one open pull request on the forge. Review and CI are "" when
+// unknown; ci "none" means no checks ran.
 type jsonPR struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
 	Author  string `json:"author"`
 	Draft   bool   `json:"draft"`
 	Updated string `json:"updated"`
+	URL     string `json:"url"`
+	SHA     string `json:"sha"`
+	Review  string `json:"review"`
+	CI      string `json:"ci"`
 }
 
 func jsonPRs(prs []forge.PR) []jsonPR {
@@ -157,6 +165,10 @@ func jsonPRs(prs []forge.PR) []jsonPR {
 			Author:  pr.Author,
 			Draft:   pr.Draft,
 			Updated: pr.Updated.Format(time.RFC3339),
+			URL:     pr.URL,
+			SHA:     pr.SHA,
+			Review:  string(pr.Review),
+			CI:      string(pr.CI),
 		})
 	}
 	return out
